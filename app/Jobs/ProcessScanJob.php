@@ -4,6 +4,8 @@ namespace App\Jobs;
 
 use App\Models\Job;
 use App\Models\JobOutput;
+use App\Models\ScanImage;
+use App\Services\MaskService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -20,11 +22,11 @@ class ProcessScanJob implements ShouldQueue
     {
     }
 
-    public function handle(): void
+    public function handle(MaskService $maskService): void
     {
-        $job = Job::query()->find($this->jobId);
+        $job = Job::query()->with(['scan', 'scan.scanImages'])->find($this->jobId);
 
-        if (! $job) {
+        if (! $job || ! $job->scan) {
             return;
         }
 
@@ -32,13 +34,42 @@ class ProcessScanJob implements ShouldQueue
             $job->update([
                 'status' => 'processing',
                 'progress' => 0.100,
-                'message' => 'Preparing scan processing',
+                'message' => 'Preprocessing images',
             ]);
 
             usleep(300000);
 
+            $images = $job->scan->scanImages->sortBy('slot')->values();
+            $totalImages = $images->count();
+
+            if ($totalImages > 0) {
+                foreach ($images as $index => $image) {
+                    /** @var ScanImage $image */
+                    $rgbaPath = $maskService->generateRgba($job->scan_id, (int) $image->slot);
+
+                    $image->update([
+                        'path_rgba' => $rgbaPath,
+                    ]);
+
+                    $processed = $index + 1;
+                    $progress = 0.100 + (($processed / $totalImages) * 0.400);
+
+                    $job->update([
+                        'progress' => round($progress, 3),
+                        'message' => "Preprocessing images ({$processed}/{$totalImages})",
+                    ]);
+                }
+            } else {
+                $job->update([
+                    'progress' => 0.500,
+                    'message' => 'No images to preprocess',
+                ]);
+            }
+
+            usleep(300000);
+
             $job->update([
-                'progress' => 0.500,
+                'progress' => 0.900,
                 'message' => 'Generating placeholder outputs',
             ]);
 
@@ -72,6 +103,7 @@ class ProcessScanJob implements ShouldQueue
         } catch (Throwable $e) {
             $job->update([
                 'status' => 'error',
+                'progress' => $job->progress ?? 0,
                 'message' => $e->getMessage(),
             ]);
 
