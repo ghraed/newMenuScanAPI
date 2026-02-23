@@ -86,24 +86,25 @@ class ProcessScanJob implements ShouldQueue
 
             $job->update([
                 'progress' => 0.900,
-                'message' => 'Generating placeholder outputs',
+                'message' => 'Converting OBJ to GLB',
             ]);
-
-            usleep(300000);
 
             $outputsDir = "scans/{$job->scan_id}/outputs";
             $glbPath = "{$outputsDir}/model.glb";
-            $usdzPath = "{$outputsDir}/model.usdz";
-
             Storage::disk('local')->makeDirectory($outputsDir);
-            Storage::disk('local')->put($glbPath, '');
-            Storage::disk('local')->put($usdzPath, '');
+
+            $this->runBlenderObjToGlb($meshroomObjPath, storage_path("app/{$glbPath}"));
+
+            $job->update([
+                'progress' => 0.970,
+                'message' => "meshroom_obj={$meshroomObjPath}",
+            ]);
 
             JobOutput::query()->updateOrCreate(
                 ['job_id' => $job->id],
                 [
                     'glb_path' => $glbPath,
-                    'usdz_path' => $usdzPath,
+                    'usdz_path' => null,
                 ]
             );
 
@@ -238,5 +239,50 @@ class ProcessScanJob implements ShouldQueue
         }
 
         return "{$prefix}: {$combined}";
+    }
+
+    private function runBlenderObjToGlb(string $inputObjPath, string $outputGlbPath): void
+    {
+        $blenderBin = (string) env('BLENDER_BIN', 'blender');
+        $scriptPath = base_path('scripts/obj_to_glb.py');
+
+        if (! is_file($scriptPath)) {
+            throw new RuntimeException('blender failed: conversion script missing');
+        }
+
+        $outputDir = dirname($outputGlbPath);
+        if (! is_dir($outputDir) && ! mkdir($outputDir, 0775, true) && ! is_dir($outputDir)) {
+            throw new RuntimeException('blender failed: could not create output dir');
+        }
+
+        $process = new Process([
+            $blenderBin,
+            '-b',
+            '-P',
+            $scriptPath,
+            '--',
+            $inputObjPath,
+            $outputGlbPath,
+        ]);
+        $process->setTimeout(null);
+
+        try {
+            $process->run();
+        } catch (Throwable $e) {
+            throw new RuntimeException(
+                $this->formatProcessTail('blender failed', $process->getOutput(), $process->getErrorOutput() ?: $e->getMessage()),
+                previous: $e
+            );
+        }
+
+        if (! $process->isSuccessful()) {
+            throw new RuntimeException(
+                $this->formatProcessTail('blender failed', $process->getOutput(), $process->getErrorOutput())
+            );
+        }
+
+        if (! is_file($outputGlbPath)) {
+            throw new RuntimeException('blender failed: GLB output missing');
+        }
     }
 }
