@@ -91,20 +91,41 @@ class ProcessScanJob implements ShouldQueue
 
             $outputsDir = "scans/{$job->scan_id}/outputs";
             $glbPath = "{$outputsDir}/model.glb";
+            $usdzPath = "{$outputsDir}/model.usdz";
             Storage::disk('local')->makeDirectory($outputsDir);
 
-            $this->runBlenderObjToGlb($meshroomObjPath, storage_path("app/{$glbPath}"));
+            $absoluteGlbPath = storage_path("app/{$glbPath}");
+            $absoluteUsdzPath = storage_path("app/{$usdzPath}");
+
+            $this->runBlenderObjToGlb($meshroomObjPath, $absoluteGlbPath);
 
             $job->update([
                 'progress' => 0.970,
                 'message' => "meshroom_obj={$meshroomObjPath}",
             ]);
 
+            $storedUsdzPath = null;
+
+            if ($this->shouldGenerateUsdz()) {
+                $job->update([
+                    'progress' => 0.985,
+                    'message' => 'Converting GLB to USDZ',
+                ]);
+
+                $this->runUsdzFromGlb($absoluteGlbPath, $absoluteUsdzPath);
+                $storedUsdzPath = $usdzPath;
+
+                $job->update([
+                    'progress' => 0.995,
+                    'message' => "meshroom_obj={$meshroomObjPath}",
+                ]);
+            }
+
             JobOutput::query()->updateOrCreate(
                 ['job_id' => $job->id],
                 [
                     'glb_path' => $glbPath,
-                    'usdz_path' => null,
+                    'usdz_path' => $storedUsdzPath,
                 ]
             );
 
@@ -283,6 +304,57 @@ class ProcessScanJob implements ShouldQueue
 
         if (! is_file($outputGlbPath)) {
             throw new RuntimeException('blender failed: GLB output missing');
+        }
+    }
+
+    private function shouldGenerateUsdz(): bool
+    {
+        $usdzBin = trim((string) env('USDZ_BIN', ''));
+
+        if ($usdzBin === '') {
+            return false;
+        }
+
+        return is_executable($usdzBin);
+    }
+
+    private function runUsdzFromGlb(string $inputGlbPath, string $outputUsdzPath): void
+    {
+        $usdzBin = trim((string) env('USDZ_BIN', ''));
+
+        if ($usdzBin === '' || ! is_executable($usdzBin)) {
+            throw new RuntimeException('usdz failed: USDZ_BIN is not executable');
+        }
+
+        $outputDir = dirname($outputUsdzPath);
+        if (! is_dir($outputDir) && ! mkdir($outputDir, 0775, true) && ! is_dir($outputDir)) {
+            throw new RuntimeException('usdz failed: could not create output dir');
+        }
+
+        $process = new Process([
+            $usdzBin,
+            $inputGlbPath,
+            $outputUsdzPath,
+        ]);
+        $process->setTimeout(null);
+
+        try {
+            $process->run();
+        } catch (Throwable $e) {
+            throw new RuntimeException(
+                $this->formatProcessTail('usdz failed', $process->getOutput(), $process->getErrorOutput() ?: $e->getMessage()),
+                previous: $e
+            );
+        }
+
+        if (! $process->isSuccessful()) {
+            throw new RuntimeException(
+                $this->formatProcessTail('usdz failed', $process->getOutput(), $process->getErrorOutput())
+            );
+        }
+
+        if (! is_file($outputUsdzPath)) {
+            throw new RuntimeException('usdz failed: USDZ output missing');
         }
     }
 }
