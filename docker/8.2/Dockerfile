@@ -20,7 +20,7 @@ RUN apt-get update \
     && /opt/rembg-env/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/rembg-env/bin/pip install --no-cache-dir rembg \
     && mkdir -p /opt/meshroom \
-    && wget -O /tmp/Meshroom-2023.3.0-linux.tar.gz "https://sourceforge.net/projects/meshroom/files/v2023.3.0/Meshroom-2023.3.0-linux.tar.gz/download" \
+    && wget -O /tmp/Meshroom-2023.3.0-linux.tar.gz "https://github.com/alicevision/Meshroom/releases/download/v2023.3.0/Meshroom-2023.3.0-linux.tar.gz" \
     && tar -xzf /tmp/Meshroom-2023.3.0-linux.tar.gz -C /opt/meshroom --strip-components=1 \
     && chmod +x /opt/meshroom/meshroom_batch \
     && ln -sf /opt/meshroom/meshroom_batch /usr/local/bin/meshroom_batch \

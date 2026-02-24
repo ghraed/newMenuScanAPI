@@ -1,13 +1,14 @@
 services:
     laravel.test:
+        restart: unless-stopped
         build:
             context: .
-            dockerfile: docker/8.2/Dockerfile
-        image: 'sail-8.2/app'
+            dockerfile: docker/8.4/Dockerfile
+        image: 'sail-8.4/app'
         extra_hosts:
             - 'host.docker.internal:host-gateway'
         ports:
-            - '8000:80'
+            - '127.0.0.1:18000:80'
         environment:
             WWWUSER: '${WWWUSER:-1000}'
             LARAVEL_SAIL: 1
@@ -21,11 +22,13 @@ services:
         depends_on:
             - mysql
             - redis
+
     queue:
+        restart: unless-stopped
         build:
             context: .
-            dockerfile: docker/8.2/Dockerfile
-        image: 'sail-8.2/app'
+            dockerfile: docker/8.4/Dockerfile
+        image: 'sail-8.4/app'
         extra_hosts:
             - 'host.docker.internal:host-gateway'
         command: php artisan queue:work --tries=1
@@ -42,10 +45,12 @@ services:
         depends_on:
             - mysql
             - redis
+
     mysql:
+        restart: unless-stopped
         image: 'mysql:8.4'
         ports:
-            - '${FORWARD_DB_PORT:-3306}:3306'
+            - '127.0.0.1:${FORWARD_DB_PORT:-3306}:3306'
         environment:
             MYSQL_ROOT_PASSWORD: '${DB_PASSWORD}'
             MYSQL_ROOT_HOST: '%'
@@ -67,10 +72,12 @@ services:
                 - '-p${DB_PASSWORD}'
             retries: 3
             timeout: 5s
+
     redis:
+        restart: unless-stopped
         image: 'redis:alpine'
         ports:
-            - '${FORWARD_REDIS_PORT:-6379}:6379'
+            - '127.0.0.1:${FORWARD_REDIS_PORT:-6379}:6379'
         volumes:
             - 'sail-redis:/data'
         networks:
@@ -92,3 +99,4 @@ volumes:
         driver: local
     sail-redis:
         driver: local
+
