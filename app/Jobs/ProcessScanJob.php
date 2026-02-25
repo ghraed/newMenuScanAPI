@@ -201,9 +201,20 @@ class ProcessScanJob implements ShouldQueue
         $rgbaFolder = Storage::disk('local')->path("scans/{$scanId}/rgba");
         $imageFolder = Storage::disk('local')->path("scans/{$scanId}/images");
 
-        $rgbaFiles = glob($rgbaFolder.'/*.png') ?: [];
-        if ($rgbaFiles !== []) {
-            return $rgbaFolder;
+        $inputSource = strtolower(trim((string) env('MESHROOM_INPUT_SOURCE', 'original')));
+
+        if ($inputSource === 'rgba') {
+            $rgbaFiles = glob($rgbaFolder.'/*.png') ?: [];
+            if ($rgbaFiles !== []) {
+                return $rgbaFolder;
+            }
+        }
+
+        if ($inputSource === 'auto') {
+            $rgbaFiles = glob($rgbaFolder.'/*.png') ?: [];
+            if ($rgbaFiles !== []) {
+                return $rgbaFolder;
+            }
         }
 
         return $imageFolder;
