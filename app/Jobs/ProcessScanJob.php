@@ -94,8 +94,8 @@ class ProcessScanJob implements ShouldQueue
             $usdzPath = "{$outputsDir}/model.usdz";
             Storage::disk('local')->makeDirectory($outputsDir);
 
-            $absoluteGlbPath = storage_path("app/{$glbPath}");
-            $absoluteUsdzPath = storage_path("app/{$usdzPath}");
+            $absoluteGlbPath = Storage::disk('local')->path($glbPath);
+            $absoluteUsdzPath = Storage::disk('local')->path($usdzPath);
 
             $this->runBlenderObjToGlb($meshroomObjPath, $absoluteGlbPath);
 
@@ -198,8 +198,8 @@ class ProcessScanJob implements ShouldQueue
 
     private function resolveMeshroomInputFolder(string $scanId): string
     {
-        $rgbaFolder = storage_path("app/scans/{$scanId}/rgba");
-        $imageFolder = storage_path("app/scans/{$scanId}/images");
+        $rgbaFolder = Storage::disk('local')->path("scans/{$scanId}/rgba");
+        $imageFolder = Storage::disk('local')->path("scans/{$scanId}/images");
 
         $rgbaFiles = glob($rgbaFolder.'/*.png') ?: [];
         if ($rgbaFiles !== []) {
