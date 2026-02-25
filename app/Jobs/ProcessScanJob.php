@@ -169,7 +169,18 @@ class ProcessScanJob implements ShouldQueue
         }
 
         $meshroomBin = (string) env('MESHROOM_BIN', 'meshroom_batch');
-        $process = new Process([$meshroomBin, '--input', $inputFolder, '--output', $outputFolder], $workdir);
+        $meshroomCommand = [$meshroomBin, '--input', $inputFolder, '--output', $outputFolder];
+
+        $forceCpuExtraction = filter_var(
+            (string) env('MESHROOM_FORCE_CPU_EXTRACTION', 'true'),
+            FILTER_VALIDATE_BOOL
+        );
+        if ($forceCpuExtraction) {
+            $meshroomCommand[] = '--forceCpuExtraction';
+            $meshroomCommand[] = '1';
+        }
+
+        $process = new Process($meshroomCommand, $workdir);
         $process->setTimeout(null);
 
         try {
