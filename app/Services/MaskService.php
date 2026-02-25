@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Throwable;
@@ -13,12 +14,12 @@ class MaskService
         $inputRelative = "scans/{$scanId}/images/{$slot}.jpg";
         $outputRelative = "scans/{$scanId}/rgba/{$slot}.png";
 
-        $inputPath = storage_path("app/{$inputRelative}");
-        $outputPath = storage_path("app/{$outputRelative}");
+        $inputPath = Storage::disk('local')->path($inputRelative);
+        $outputPath = Storage::disk('local')->path($outputRelative);
         $outputDir = dirname($outputPath);
 
         if (! is_file($inputPath)) {
-            throw new RuntimeException("rembg input missing for slot {$slot}");
+            throw new RuntimeException("rembg input missing for slot {$slot}: {$inputPath}");
         }
 
         if (! is_dir($outputDir) && ! mkdir($outputDir, 0775, true) && ! is_dir($outputDir)) {
