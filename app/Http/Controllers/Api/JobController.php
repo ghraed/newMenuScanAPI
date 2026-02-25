@@ -16,19 +16,24 @@ class JobController extends Controller
         $response = [
             'status' => $job->status,
             'progress' => (float) $job->progress,
-            'outputs' => [],
         ];
+
+        $outputs = [];
 
         if ($job->message !== null) {
             $response['message'] = $job->message;
         }
 
         if ($job->jobOutput?->glb_path) {
-            $response['outputs']['glbUrl'] = route('api.files.show', ['scanId' => $job->scan_id, 'type' => 'glb']);
+            $outputs['glbUrl'] = route('api.files.show', ['scanId' => $job->scan_id, 'type' => 'glb']);
         }
 
         if ($job->jobOutput?->usdz_path) {
-            $response['outputs']['usdzUrl'] = route('api.files.show', ['scanId' => $job->scan_id, 'type' => 'usdz']);
+            $outputs['usdzUrl'] = route('api.files.show', ['scanId' => $job->scan_id, 'type' => 'usdz']);
+        }
+
+        if ($outputs !== []) {
+            $response['outputs'] = $outputs;
         }
 
         return response()->json($response);
