@@ -176,8 +176,8 @@ class ProcessScanJob implements ShouldQueue
             FILTER_VALIDATE_BOOL
         );
         if ($forceCpuExtraction) {
-            $meshroomCommand[] = '--forceCpuExtraction';
-            $meshroomCommand[] = '1';
+            $meshroomCommand[] = '--paramOverrides';
+            $meshroomCommand[] = 'FeatureExtraction:forceCpuExtraction=1';
         }
 
         $process = new Process($meshroomCommand, $workdir);
