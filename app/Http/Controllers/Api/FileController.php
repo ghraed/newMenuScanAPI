@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\DownloadScanFileRequest;
 use App\Models\Job;
+use App\Models\ScanImage;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -60,5 +61,31 @@ class FileController extends Controller
         }
 
         return Storage::disk('local')->response($path);
+    }
+
+    public function rgba(string $scanId, int $slot): StreamedResponse|BinaryFileResponse
+    {
+        $image = ScanImage::query()
+            ->where('scan_id', $scanId)
+            ->where('slot', $slot)
+            ->first();
+
+        if (! $image || ! $image->path_rgba) {
+            throw new HttpResponseException(response()->json([
+                'message' => 'RGBA image not found',
+            ], 404));
+        }
+
+        if (! Storage::disk('local')->exists($image->path_rgba)) {
+            throw new HttpResponseException(response()->json([
+                'message' => 'RGBA image not found',
+            ], 404));
+        }
+
+        return Storage::disk('local')->response(
+            $image->path_rgba,
+            null,
+            ['Content-Type' => 'image/png']
+        );
     }
 }

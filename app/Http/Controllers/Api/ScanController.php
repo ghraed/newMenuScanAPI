@@ -11,9 +11,10 @@ use App\Jobs\ProcessScanJob;
 use App\Models\Job;
 use App\Models\Scan;
 use App\Models\ScanImage;
+use App\Services\MaskService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 
 class ScanController extends Controller
 {
@@ -60,6 +61,52 @@ class ScanController extends Controller
         return response()->json([
             'ok' => true,
         ]);
+    }
+
+    public function preprocess(SubmitScanRequest $request, string $scanId, MaskService $maskService): JsonResponse
+    {
+        $scan = Scan::query()->with('scanImages')->findOrFail($scanId);
+        $images = $scan->scanImages->sortBy('slot')->values();
+
+        if ($images->isEmpty()) {
+            return response()->json([
+                'message' => 'No uploaded images to preprocess.',
+            ], 422);
+        }
+
+        $processed = 0;
+
+        try {
+            foreach ($images as $image) {
+                /** @var ScanImage $image */
+                $rgbaPath = $maskService->generateRgba($scan->id, (int) $image->slot);
+
+                $image->update([
+                    'path_rgba' => $rgbaPath,
+                ]);
+
+                $processed += 1;
+            }
+
+            if ($scan->status === 'draft') {
+                $scan->update(['status' => 'uploaded']);
+            }
+
+            return response()->json([
+                'ok' => true,
+                'processed' => $processed,
+                'total' => $images->count(),
+            ]);
+        } catch (\Throwable $error) {
+            Log::error('Scan background preprocessing failed', [
+                'scan_id' => $scanId,
+                'error' => $error->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to preprocess scan images.',
+            ], 500);
+        }
     }
 
     public function submit(SubmitScanRequest $request, string $scanId): JsonResponse
