@@ -25,4 +25,4 @@ Route::middleware(RequireApiKey::class)->group(function () {
         ->whereIn('type', ['glb', 'usdz'])
         ->name('api.files.show');
 });
-// test
+// test1
