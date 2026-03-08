@@ -3,18 +3,18 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StartBackgroundRemovalRequest;
 use App\Http\Requests\ShowScanRequest;
 use App\Http\Requests\StoreScanImageRequest;
 use App\Http\Requests\StoreScanRequest;
 use App\Http\Requests\SubmitScanRequest;
+use App\Jobs\ProcessBackgroundRemovalJob;
 use App\Jobs\ProcessScanJob;
 use App\Models\Job;
 use App\Models\Scan;
 use App\Models\ScanImage;
-use App\Services\MaskService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 class ScanController extends Controller
 {
@@ -31,6 +31,7 @@ class ScanController extends Controller
             'scanId' => $scan->id,
         ], 201);
     }
+
 
     public function storeImage(StoreScanImageRequest $request, string $scanId): JsonResponse
     {
@@ -63,7 +64,7 @@ class ScanController extends Controller
         ]);
     }
 
-    public function preprocess(SubmitScanRequest $request, string $scanId, MaskService $maskService): JsonResponse
+    public function preprocess(StartBackgroundRemovalRequest $request, string $scanId): JsonResponse
     {
         $scan = Scan::query()->with('scanImages')->findOrFail($scanId);
         $images = $scan->scanImages->sortBy('slot')->values();
@@ -74,39 +75,54 @@ class ScanController extends Controller
             ], 422);
         }
 
-        $processed = 0;
+        $activeJob = Job::query()
+            ->where('scan_id', $scan->id)
+            ->where('type', 'background')
+            ->whereIn('status', ['queued', 'processing', 'partial'])
+            ->latest()
+            ->first();
 
-        try {
-            foreach ($images as $image) {
-                /** @var ScanImage $image */
-                $rgbaPath = $maskService->generateRgba($scan->id, (int) $image->slot);
-
-                $image->update([
-                    'path_rgba' => $rgbaPath,
-                ]);
-
-                $processed += 1;
-            }
-
-            if ($scan->status === 'draft') {
-                $scan->update(['status' => 'uploaded']);
-            }
-
+        if ($activeJob) {
             return response()->json([
-                'ok' => true,
-                'processed' => $processed,
-                'total' => $images->count(),
+                'jobId' => $activeJob->id,
+                'status' => $activeJob->status,
+                'progress' => (float) $activeJob->progress,
+                'availableSlots' => $images
+                    ->filter(fn (ScanImage $image) => $image->path_rgba !== null)
+                    ->pluck('slot')
+                    ->values(),
+                'previewAvailable' => $images->contains(fn (ScanImage $image) => $image->path_rgba !== null),
+                'message' => $activeJob->message,
             ]);
-        } catch (\Throwable $error) {
-            Log::error('Scan background preprocessing failed', [
-                'scan_id' => $scanId,
-                'error' => $error->getMessage(),
-            ]);
-
-            return response()->json([
-                'message' => 'Failed to preprocess scan images.',
-            ], 500);
         }
+
+        ScanImage::query()
+            ->where('scan_id', $scan->id)
+            ->update(['path_rgba' => null]);
+
+        $job = Job::query()->create([
+            'scan_id' => $scan->id,
+            'type' => 'background',
+            'status' => 'queued',
+            'progress' => 0,
+            'meta' => [
+                'objectSelection' => $request->validated('objectSelection'),
+            ],
+        ]);
+
+        if ($scan->status === 'draft') {
+            $scan->update(['status' => 'uploaded']);
+        }
+
+        ProcessBackgroundRemovalJob::dispatch($job->id);
+
+        return response()->json([
+            'jobId' => $job->id,
+            'status' => $job->status,
+            'progress' => (float) $job->progress,
+            'availableSlots' => [],
+            'previewAvailable' => false,
+        ]);
     }
 
     public function submit(SubmitScanRequest $request, string $scanId): JsonResponse
@@ -116,6 +132,7 @@ class ScanController extends Controller
 
             $job = Job::query()->create([
                 'scan_id' => $scan->id,
+                'type' => 'model',
                 'status' => 'queued',
                 'progress' => 0,
             ]);

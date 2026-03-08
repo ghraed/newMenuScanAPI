@@ -18,9 +18,16 @@ class Job extends Model
 
     protected $fillable = [
         'scan_id',
+        'type',
         'status',
         'progress',
         'message',
+        'meta',
+    ];
+
+    protected $casts = [
+        'progress' => 'float',
+        'meta' => 'array',
     ];
 
     public function scan(): BelongsTo
