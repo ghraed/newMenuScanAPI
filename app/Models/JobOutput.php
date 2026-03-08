@@ -19,10 +19,36 @@ class JobOutput extends Model
         'job_id',
         'glb_path',
         'usdz_path',
+        'preview_path',
+        'obj_path',
     ];
 
     public function job(): BelongsTo
     {
         return $this->belongsTo(Job::class);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function availablePaths(): array
+    {
+        return array_filter([
+            'glb' => $this->glb_path,
+            'usdz' => $this->usdz_path,
+            'preview' => $this->preview_path,
+            'obj' => $this->obj_path,
+        ], static fn (?string $path): bool => $path !== null && $path !== '');
+    }
+
+    public function pathForType(string $type): ?string
+    {
+        return match ($type) {
+            'glb' => $this->glb_path,
+            'usdz' => $this->usdz_path,
+            'preview' => $this->preview_path,
+            'obj' => $this->obj_path,
+            default => null,
+        };
     }
 }

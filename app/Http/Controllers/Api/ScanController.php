@@ -11,13 +11,21 @@ use App\Http\Requests\SubmitScanRequest;
 use App\Jobs\ProcessBackgroundRemovalJob;
 use App\Jobs\ProcessScanJob;
 use App\Models\Job;
+use App\Models\JobOutput;
 use App\Models\Scan;
 use App\Models\ScanImage;
+use App\Services\ObjectStorageService;
+use App\Support\ScanObjectKeys;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
 class ScanController extends Controller
 {
+    public function __construct(
+        private readonly ObjectStorageService $objectStorage,
+    ) {
+    }
+
     public function store(StoreScanRequest $request): JsonResponse
     {
         $scan = Scan::query()->create([
@@ -38,11 +46,12 @@ class ScanController extends Controller
         $scan = Scan::query()->findOrFail($scanId);
 
         $slot = (int) $request->integer('slot');
-        $path = $request->file('image')->storeAs(
-            "scans/{$scan->id}/images",
-            "{$slot}.jpg",
-            'local'
-        );
+        $path = ScanObjectKeys::imageForSlot($scan->id, $slot);
+        $sourcePath = $request->file('image')->getRealPath() ?: $request->file('image')->path();
+
+        $this->objectStorage->uploadFile($path, $sourcePath, [
+            'ContentType' => $request->file('image')->getMimeType() ?: 'image/jpeg',
+        ]);
 
         ScanImage::query()->updateOrCreate(
             [
@@ -94,6 +103,17 @@ class ScanController extends Controller
                 'previewAvailable' => $images->contains(fn (ScanImage $image) => $image->path_rgba !== null),
                 'message' => $activeJob->message,
             ]);
+        }
+
+        $staleProcessedPaths = $images
+            ->pluck('path_rgba')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($staleProcessedPaths !== []) {
+            $this->objectStorage->delete($staleProcessedPaths);
         }
 
         ScanImage::query()
@@ -162,8 +182,7 @@ class ScanController extends Controller
             ->findOrFail($scanId);
 
         $latestOutputJob = $scan->jobs->first(function (Job $job) {
-            return $job->jobOutput
-                && ($job->jobOutput->glb_path !== null || $job->jobOutput->usdz_path !== null);
+            return $job->jobOutput && $job->jobOutput->availablePaths() !== [];
         });
 
         $response = [
@@ -176,20 +195,34 @@ class ScanController extends Controller
             'imagesCount' => $scan->scan_images_count,
         ];
 
-        $outputs = [];
-
-        if ($latestOutputJob?->jobOutput?->glb_path) {
-            $outputs['glbUrl'] = route('api.files.show', ['scanId' => $scan->id, 'type' => 'glb']);
-        }
-
-        if ($latestOutputJob?->jobOutput?->usdz_path) {
-            $outputs['usdzUrl'] = route('api.files.show', ['scanId' => $scan->id, 'type' => 'usdz']);
-        }
+        $outputs = $this->buildOutputUrls($latestOutputJob?->jobOutput, $scan->id);
 
         if ($outputs !== []) {
             $response['outputs'] = $outputs;
         }
 
         return response()->json($response);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function buildOutputUrls(?JobOutput $jobOutput, string $scanId): array
+    {
+        if (! $jobOutput) {
+            return [];
+        }
+
+        $outputs = [];
+
+        foreach ($jobOutput->availablePaths() as $type => $path) {
+            $outputs["{$type}Url"] = route('api.files.show', ['scanId' => $scanId, 'type' => $type]);
+
+            if ($signedUrl = $this->objectStorage->temporaryUrlIfAvailable($path)) {
+                $outputs["{$type}SignedUrl"] = $signedUrl;
+            }
+        }
+
+        return $outputs;
     }
 }

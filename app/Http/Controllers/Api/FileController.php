@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\DownloadScanFileRequest;
 use App\Models\Job;
 use App\Models\ScanImage;
+use App\Services\ObjectStorageService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -13,7 +15,16 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class FileController extends Controller
 {
-    public function show(DownloadScanFileRequest $request, string $scanId, string $type): StreamedResponse|BinaryFileResponse
+    public function __construct(
+        private readonly ObjectStorageService $objectStorage,
+    ) {
+    }
+
+    public function show(
+        DownloadScanFileRequest $request,
+        string $scanId,
+        string $type
+    ): StreamedResponse|BinaryFileResponse|RedirectResponse
     {
         $job = Job::query()
             ->with('jobOutput')
@@ -21,13 +32,7 @@ class FileController extends Controller
             ->latest()
             ->get()
             ->first(function (Job $job) use ($type) {
-                if (! $job->jobOutput) {
-                    return false;
-                }
-
-                return $type === 'glb'
-                    ? $job->jobOutput->glb_path !== null
-                    : $job->jobOutput->usdz_path !== null;
+                return $job->jobOutput?->pathForType($type) !== null;
             });
 
         if (! $job || ! $job->jobOutput) {
@@ -36,34 +41,10 @@ class FileController extends Controller
             ], 404));
         }
 
-        $path = $type === 'glb' ? $job->jobOutput->glb_path : $job->jobOutput->usdz_path;
-
-        if (! $path) {
-            throw new HttpResponseException(response()->json([
-                'message' => 'File not found',
-            ], 404));
-        }
-
-        if (str_starts_with($path, '/')) {
-            if (! is_file($path)) {
-                throw new HttpResponseException(response()->json([
-                    'message' => 'File not found',
-                ], 404));
-            }
-
-            return response()->file($path);
-        }
-
-        if (! Storage::disk('local')->exists($path)) {
-            throw new HttpResponseException(response()->json([
-                'message' => 'File not found',
-            ], 404));
-        }
-
-        return Storage::disk('local')->response($path);
+        return $this->responseForStoredPath($job->jobOutput->pathForType($type));
     }
 
-    public function rgba(string $scanId, int $slot): StreamedResponse|BinaryFileResponse
+    public function rgba(string $scanId, int $slot): StreamedResponse|BinaryFileResponse|RedirectResponse
     {
         $image = ScanImage::query()
             ->where('scan_id', $scanId)
@@ -76,16 +57,42 @@ class FileController extends Controller
             ], 404));
         }
 
-        if (! Storage::disk('local')->exists($image->path_rgba)) {
+        return $this->responseForStoredPath(
+            $image->path_rgba,
+            ['Content-Type' => 'image/png']
+        );
+    }
+
+    private function responseForStoredPath(
+        ?string $path,
+        array $headers = []
+    ): StreamedResponse|BinaryFileResponse|RedirectResponse {
+        if (! $path) {
             throw new HttpResponseException(response()->json([
-                'message' => 'RGBA image not found',
+                'message' => 'File not found',
             ], 404));
         }
 
-        return Storage::disk('local')->response(
-            $image->path_rgba,
-            null,
-            ['Content-Type' => 'image/png']
-        );
+        if ($signedUrl = $this->objectStorage->temporaryUrlIfAvailable($path)) {
+            return redirect()->away($signedUrl);
+        }
+
+        if (str_starts_with($path, '/')) {
+            if (! is_file($path)) {
+                throw new HttpResponseException(response()->json([
+                    'message' => 'File not found',
+                ], 404));
+            }
+
+            return response()->file($path, $headers);
+        }
+
+        if (! Storage::disk('local')->exists($path)) {
+            throw new HttpResponseException(response()->json([
+                'message' => 'File not found',
+            ], 404));
+        }
+
+        return Storage::disk('local')->response($path, null, $headers);
     }
 }

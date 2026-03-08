@@ -2,7 +2,8 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\Storage;
+use App\Models\ScanImage;
+use App\Support\ScanObjectKeys;
 use RuntimeException;
 use SplQueue;
 use Symfony\Component\Process\Process;
@@ -10,16 +11,30 @@ use Throwable;
 
 class MaskService
 {
-    public function generateRgba(string $scanId, int $slot, array $options = []): string
-    {
-        $inputRelative = "scans/{$scanId}/images/{$slot}.jpg";
-        $outputRelative = "scans/{$scanId}/rgba/{$slot}.png";
+    public function __construct(
+        private readonly ObjectStorageService $objectStorage,
+    ) {
+    }
 
-        $inputPath = Storage::disk('local')->path($inputRelative);
-        $outputPath = Storage::disk('local')->path($outputRelative);
-        $outputDir = dirname($outputPath);
+    /**
+     * @return array{key: string, local_path: string}
+     */
+    public function generateRgba(ScanImage $image, array $options = []): array
+    {
+        $scanId = (string) $image->scan_id;
+        $slot = (int) $image->slot;
         $mode = $options['mode'] ?? 'final';
         $selection = $options['selection'] ?? null;
+        $workdir = rtrim((string) ($options['workdir'] ?? ''), DIRECTORY_SEPARATOR);
+        $outputKey = ScanObjectKeys::processedForSlot($scanId, $slot);
+
+        if ($workdir === '') {
+            throw new RuntimeException('rembg failed: workdir missing');
+        }
+
+        $inputPath = (string) ($options['input_path'] ?? $this->downloadSourceImage($image, $workdir));
+        $outputPath = (string) ($options['output_path'] ?? "{$workdir}/processed/{$slot}.png");
+        $outputDir = dirname($outputPath);
 
         if (! is_file($inputPath)) {
             throw new RuntimeException("rembg input missing for slot {$slot}: {$inputPath}");
@@ -29,7 +44,7 @@ class MaskService
             throw new RuntimeException("failed to create rgba directory for slot {$slot}");
         }
 
-        $prepared = $this->prepareInputImage($scanId, $slot, $inputPath, $selection, $mode);
+        $prepared = $this->prepareInputImage($slot, $inputPath, "{$workdir}/tmp", $selection, $mode);
         $preparedInputPath = $prepared['path'];
         $selectionContext = $prepared['selectionContext'];
         $binary = (string) env('REMBG_BIN', 'rembg');
@@ -63,13 +78,20 @@ class MaskService
             @unlink($preparedInputPath);
         }
 
-        return $outputRelative;
+        $this->objectStorage->uploadFile($outputKey, $outputPath, [
+            'ContentType' => 'image/png',
+        ]);
+
+        return [
+            'key' => $outputKey,
+            'local_path' => $outputPath,
+        ];
     }
 
     private function prepareInputImage(
-        string $scanId,
         int $slot,
         string $inputPath,
+        string $tempDir,
         mixed $selection,
         string $mode
     ): array {
@@ -116,7 +138,6 @@ class MaskService
             $preparedHeight,
         );
 
-        $tempDir = Storage::disk('local')->path("scans/{$scanId}/tmp");
         if (! is_dir($tempDir) && ! mkdir($tempDir, 0775, true) && ! is_dir($tempDir)) {
             throw new RuntimeException("failed to create temp directory for slot {$slot}");
         }
@@ -145,6 +166,17 @@ class MaskService
             'path' => $tempPath,
             'selectionContext' => $selectionContext,
         ];
+    }
+
+    private function downloadSourceImage(ScanImage $image, string $workdir): string
+    {
+        $scanId = (string) $image->scan_id;
+        $slot = (int) $image->slot;
+        $storedPath = (string) ($image->path_original ?: ScanObjectKeys::imageForSlot($scanId, $slot));
+        $extension = pathinfo($storedPath, PATHINFO_EXTENSION) ?: 'jpg';
+        $localPath = "{$workdir}/images/{$slot}.{$extension}";
+
+        return $this->objectStorage->downloadStoredPathTo($storedPath, $localPath);
     }
 
     private function resolveCropWindow(mixed $selection, int $width, int $height, string $mode): ?array

@@ -11,6 +11,8 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\File;
+use RuntimeException;
 use Throwable;
 
 class ProcessBackgroundRemovalJob implements ShouldQueue
@@ -28,6 +30,8 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
         if (! $job || ! $job->scan) {
             return;
         }
+
+        $workdir = $this->createWorkdir($job->id);
 
         /** @var Collection<int, ScanImage> $images */
         $images = $job->scan->scanImages->sortBy('slot')->values();
@@ -56,13 +60,15 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
 
             foreach ($previewImages as $index => $image) {
                 $previewNumber = $index + 1;
-                $rgbaPath = $maskService->generateRgba($job->scan_id, (int) $image->slot, [
+                $rgba = $maskService->generateRgba($image, [
                     'selection' => $selection,
                     'mode' => 'preview',
+                    'workdir' => $workdir,
+                    'output_path' => "{$workdir}/preview/{$image->slot}.png",
                 ]);
 
                 $image->update([
-                    'path_rgba' => $rgbaPath,
+                    'path_rgba' => $rgba['key'],
                 ]);
 
                 $job->update([
@@ -75,13 +81,15 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
             }
 
             foreach ($images as $index => $image) {
-                $rgbaPath = $maskService->generateRgba($job->scan_id, (int) $image->slot, [
+                $rgba = $maskService->generateRgba($image, [
                     'selection' => $selection,
                     'mode' => 'final',
+                    'workdir' => $workdir,
+                    'output_path' => "{$workdir}/processed/{$image->slot}.png",
                 ]);
 
                 $image->update([
-                    'path_rgba' => $rgbaPath,
+                    'path_rgba' => $rgba['key'],
                 ]);
 
                 $processed = $index + 1;
@@ -103,6 +111,8 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
                 'progress' => $job->progress ?? 0,
                 'message' => $error->getMessage(),
             ]);
+        } finally {
+            File::deleteDirectory($workdir);
         }
     }
 
@@ -127,5 +137,20 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
         return $indexes->map(fn (int $index) => $images->get($index))
             ->filter(fn ($image) => $image instanceof ScanImage)
             ->values();
+    }
+
+    private function createWorkdir(string $jobId): string
+    {
+        $configured = rtrim((string) env('PIPELINE_WORKDIR', storage_path('app/pipeline')), '/');
+        $baseDir = str_starts_with($configured, '/')
+            ? $configured
+            : base_path($configured);
+        $workdir = "{$baseDir}/background-{$jobId}";
+
+        if (! is_dir($workdir) && ! mkdir($workdir, 0775, true) && ! is_dir($workdir)) {
+            throw new RuntimeException('background removal failed: could not create pipeline workdir');
+        }
+
+        return $workdir;
     }
 }

@@ -23,7 +23,7 @@ class DownloadScanFileRequest extends FormRequest
     {
         return [
             'scanId' => ['required', 'uuid', 'exists:scans,id'],
-            'type' => ['required', 'string', 'in:glb,usdz'],
+            'type' => ['required', 'string', 'in:glb,usdz,preview,obj'],
         ];
     }
 }

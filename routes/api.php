@@ -22,7 +22,7 @@ Route::middleware(RequireApiKey::class)->group(function () {
 
     Route::get('/files/{scanId}/{type}', [FileController::class, 'show'])
         ->whereUuid('scanId')
-        ->whereIn('type', ['glb', 'usdz'])
+        ->whereIn('type', ['glb', 'usdz', 'preview', 'obj'])
         ->name('api.files.show');
 });
 // test1
