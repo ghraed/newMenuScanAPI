@@ -81,6 +81,18 @@ def _enable_alpha_blending():
             material.use_backface_culling = False
 
 
+def _import_obj(filepath):
+    if hasattr(bpy.ops.wm, "obj_import"):
+        bpy.ops.wm.obj_import(filepath=filepath)
+        return
+
+    if hasattr(bpy.ops.import_scene, "obj"):
+        bpy.ops.import_scene.obj(filepath=filepath)
+        return
+
+    raise SystemExit("OBJ import operator is not available in this Blender build")
+
+
 def main():
     args = _args_after_double_dash()
     if len(args) != 2:
@@ -97,7 +109,7 @@ def main():
 
     _clear_scene()
 
-    bpy.ops.wm.obj_import(filepath=input_obj)
+    _import_obj(input_obj)
 
     obj_dir = os.path.dirname(input_obj)
     _ensure_texture_links(obj_dir)
