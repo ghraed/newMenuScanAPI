@@ -87,7 +87,7 @@ class BackgroundRemovalApiTest extends TestCase
             'slot' => 0,
             'heading' => 0,
             'path_original' => "scans/{$scan->id}/images/0.jpg",
-            'path_rgba' => "scans/{$scan->id}/rgba/0.png",
+            'path_mask' => "scans/{$scan->id}/processed/previews/0.png",
         ]);
 
         ScanImage::query()->create([

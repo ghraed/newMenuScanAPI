@@ -18,7 +18,7 @@ RUN apt-get update \
     libglib2.0-0 \
     && python3 -m venv /opt/rembg-env \
     && /opt/rembg-env/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/rembg-env/bin/pip install --no-cache-dir rembg \
+    && /opt/rembg-env/bin/pip install --no-cache-dir "rembg[gpu,cli]" \
     && mkdir -p /opt/meshroom \
     && curl -L --retry 5 --retry-delay 5 -o /tmp/Meshroom-2023.3.0-linux.tar.gz "https://downloads.sourceforge.net/project/meshroom/v2023.3.0/Meshroom-2023.3.0-linux.tar.gz" \
     && tar -xzf /tmp/Meshroom-2023.3.0-linux.tar.gz -C /opt/meshroom --strip-components=1 \
@@ -27,4 +27,3 @@ RUN apt-get update \
     && rm -f /tmp/Meshroom-2023.3.0-linux.tar.gz \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-

@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Job;
 use App\Models\ScanImage;
 use App\Services\MaskService;
+use App\Services\ObjectStorageService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -23,7 +24,7 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
     {
     }
 
-    public function handle(MaskService $maskService): void
+    public function handle(MaskService $maskService, ObjectStorageService $objectStorage): void
     {
         $job = Job::query()->with(['scan', 'scan.scanImages'])->find($this->jobId);
 
@@ -68,7 +69,7 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
                 ]);
 
                 $image->update([
-                    'path_rgba' => $rgba['key'],
+                    'path_mask' => $rgba['key'],
                 ]);
 
                 $job->update([
@@ -81,6 +82,7 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
             }
 
             foreach ($images as $index => $image) {
+                $previewKey = $image->path_mask;
                 $rgba = $maskService->generateRgba($image, [
                     'selection' => $selection,
                     'mode' => 'final',
@@ -89,8 +91,13 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
                 ]);
 
                 $image->update([
+                    'path_mask' => null,
                     'path_rgba' => $rgba['key'],
                 ]);
+
+                if ($previewKey) {
+                    $objectStorage->delete($previewKey);
+                }
 
                 $processed = $index + 1;
                 $job->update([

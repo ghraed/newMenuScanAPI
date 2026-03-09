@@ -51,14 +51,16 @@ class FileController extends Controller
             ->where('slot', $slot)
             ->first();
 
-        if (! $image || ! $image->path_rgba) {
+        $storedPath = $image?->path_rgba ?: $image?->path_mask;
+
+        if (! $image || ! $storedPath) {
             throw new HttpResponseException(response()->json([
                 'message' => 'RGBA image not found',
             ], 404));
         }
 
         return $this->responseForStoredPath(
-            $image->path_rgba,
+            $storedPath,
             ['Content-Type' => 'image/png']
         );
     }

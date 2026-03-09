@@ -97,16 +97,16 @@ class ScanController extends Controller
                 'status' => $activeJob->status,
                 'progress' => (float) $activeJob->progress,
                 'availableSlots' => $images
-                    ->filter(fn (ScanImage $image) => $image->path_rgba !== null)
+                    ->filter(fn (ScanImage $image) => $this->imageHasPreviewAsset($image))
                     ->pluck('slot')
                     ->values(),
-                'previewAvailable' => $images->contains(fn (ScanImage $image) => $image->path_rgba !== null),
+                'previewAvailable' => $images->contains(fn (ScanImage $image) => $this->imageHasPreviewAsset($image)),
                 'message' => $activeJob->message,
             ]);
         }
 
         $staleProcessedPaths = $images
-            ->pluck('path_rgba')
+            ->flatMap(fn (ScanImage $image) => [$image->path_mask, $image->path_rgba])
             ->filter()
             ->unique()
             ->values()
@@ -118,7 +118,10 @@ class ScanController extends Controller
 
         ScanImage::query()
             ->where('scan_id', $scan->id)
-            ->update(['path_rgba' => null]);
+            ->update([
+                'path_mask' => null,
+                'path_rgba' => null,
+            ]);
 
         $job = Job::query()->create([
             'scan_id' => $scan->id,
@@ -224,5 +227,10 @@ class ScanController extends Controller
         }
 
         return $outputs;
+    }
+
+    private function imageHasPreviewAsset(ScanImage $image): bool
+    {
+        return $image->path_rgba !== null || $image->path_mask !== null;
     }
 }

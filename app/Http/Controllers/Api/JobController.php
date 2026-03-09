@@ -31,7 +31,7 @@ class JobController extends Controller
 
         if (($job->type ?? 'model') === 'background') {
             $availableSlots = $job->scan?->scanImages
-                ?->filter(fn ($image) => $image->path_rgba !== null)
+                ?->filter(fn ($image) => $image->path_rgba !== null || $image->path_mask !== null)
                 ->pluck('slot')
                 ->sort()
                 ->values()

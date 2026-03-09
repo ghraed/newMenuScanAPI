@@ -29,6 +29,16 @@ class ScanObjectKeys
         return self::processed($scanId, "{$slot}.png");
     }
 
+    public static function processedPreview(string $scanId, string $filename): string
+    {
+        return self::base($scanId)."/processed/previews/{$filename}";
+    }
+
+    public static function processedPreviewForSlot(string $scanId, int $slot): string
+    {
+        return self::processedPreview($scanId, "{$slot}.png");
+    }
+
     public static function output(string $scanId, string $filename): string
     {
         return self::base($scanId)."/outputs/{$filename}";

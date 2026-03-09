@@ -26,7 +26,7 @@ class MaskService
         $mode = $options['mode'] ?? 'final';
         $selection = $options['selection'] ?? null;
         $workdir = rtrim((string) ($options['workdir'] ?? ''), DIRECTORY_SEPARATOR);
-        $outputKey = ScanObjectKeys::processedForSlot($scanId, $slot);
+        $outputKey = (string) ($options['output_key'] ?? $this->resolveOutputKey($scanId, $slot, $mode));
 
         if ($workdir === '') {
             throw new RuntimeException('rembg failed: workdir missing');
@@ -86,6 +86,13 @@ class MaskService
             'key' => $outputKey,
             'local_path' => $outputPath,
         ];
+    }
+
+    private function resolveOutputKey(string $scanId, int $slot, string $mode): string
+    {
+        return $mode === 'preview'
+            ? ScanObjectKeys::processedPreviewForSlot($scanId, $slot)
+            : ScanObjectKeys::processedForSlot($scanId, $slot);
     }
 
     private function prepareInputImage(
