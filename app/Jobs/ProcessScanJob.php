@@ -443,7 +443,9 @@ class ProcessScanJob implements ShouldQueue
         }
 
         if (! is_file($outputGlbPath)) {
-            throw new RuntimeException('blender failed: GLB output missing');
+            throw new RuntimeException(
+                $this->formatProcessTail('blender failed: GLB output missing', $process->getOutput(), $process->getErrorOutput())
+            );
         }
     }
 
