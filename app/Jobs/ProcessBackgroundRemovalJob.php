@@ -28,7 +28,7 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
     {
         $job = Job::query()->with(['scan', 'scan.scanImages'])->find($this->jobId);
 
-        if (! $job || ! $job->scan) {
+        if (! $job || ! $job->scan || $job->isCanceled()) {
             return;
         }
 
@@ -51,7 +51,7 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
 
         try {
             $job->update([
-                'status' => 'processing',
+                'status' => Job::STATUS_PROCESSING,
                 'progress' => 0.05,
                 'message' => 'Preparing background removal',
             ]);
@@ -60,12 +60,14 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
             $previewCount = max(1, $previewImages->count());
 
             foreach ($previewImages as $index => $image) {
+                $this->throwIfCanceled($job);
                 $previewNumber = $index + 1;
                 $rgba = $maskService->generateRgba($image, [
                     'selection' => $selection,
                     'mode' => 'preview',
                     'workdir' => $workdir,
                     'output_path' => "{$workdir}/preview/{$image->slot}.png",
+                    'should_cancel' => fn (): bool => $job->isCanceled(),
                 ]);
 
                 $image->update([
@@ -73,7 +75,7 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
                 ]);
 
                 $job->update([
-                    'status' => 'partial',
+                    'status' => Job::STATUS_PARTIAL,
                     'progress' => round(0.10 + (($previewNumber / $previewCount) * 0.30), 3),
                     'message' => $index === 0
                         ? 'Preview ready for slot '.((int) $image->slot + 1)
@@ -82,12 +84,14 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
             }
 
             foreach ($images as $index => $image) {
+                $this->throwIfCanceled($job);
                 $previewKey = $image->path_mask;
                 $rgba = $maskService->generateRgba($image, [
                     'selection' => $selection,
                     'mode' => 'final',
                     'workdir' => $workdir,
                     'output_path' => "{$workdir}/processed/{$image->slot}.png",
+                    'should_cancel' => fn (): bool => $job->isCanceled(),
                 ]);
 
                 $image->update([
@@ -101,25 +105,40 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
 
                 $processed = $index + 1;
                 $job->update([
-                    'status' => 'partial',
+                    'status' => Job::STATUS_PARTIAL,
                     'progress' => round(0.45 + (($processed / $totalImages) * 0.50), 3),
                     'message' => "Improving quality ({$processed}/{$totalImages})",
                 ]);
             }
 
             $job->update([
-                'status' => 'ready',
+                'status' => Job::STATUS_READY,
                 'progress' => 1.0,
                 'message' => 'Background removal completed',
             ]);
         } catch (Throwable $error) {
+            if ($job->isCanceled()) {
+                $job->scan()->update([
+                    'status' => 'uploaded',
+                ]);
+
+                return;
+            }
+
             $job->update([
-                'status' => 'error',
+                'status' => Job::STATUS_ERROR,
                 'progress' => $job->progress ?? 0,
                 'message' => $error->getMessage(),
             ]);
         } finally {
             File::deleteDirectory($workdir);
+        }
+    }
+
+    private function throwIfCanceled(Job $job): void
+    {
+        if ($job->isCanceled()) {
+            throw new RuntimeException('Job canceled.');
         }
     }
 

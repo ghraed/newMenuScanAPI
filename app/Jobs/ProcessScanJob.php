@@ -30,7 +30,7 @@ class ProcessScanJob implements ShouldQueue
     {
         $job = Job::query()->with(['scan', 'scan.scanImages'])->find($this->jobId);
 
-        if (! $job || ! $job->scan) {
+        if (! $job || ! $job->scan || $job->isCanceled()) {
             return;
         }
 
@@ -55,6 +55,7 @@ class ProcessScanJob implements ShouldQueue
 
             if ($totalImages > 0) {
                 foreach ($images as $index => $image) {
+                    $this->throwIfCanceled($job);
                     /** @var ScanImage $image */
                     $localOriginalPath = $this->downloadOriginalImage($image, $imageFolder, $objectStorage);
                     $fallbackPreviewSourcePath ??= $localOriginalPath;
@@ -68,6 +69,7 @@ class ProcessScanJob implements ShouldQueue
                             'workdir' => $workdir,
                             'input_path' => $localOriginalPath,
                             'output_path' => "{$processedFolder}/{$image->slot}.png",
+                            'should_cancel' => fn (): bool => $job->isCanceled(),
                         ]);
 
                         $previewSourcePath ??= $rgba['local_path'];
@@ -114,7 +116,8 @@ class ProcessScanJob implements ShouldQueue
             ]);
 
             // Meshroom still needs a local working folder, so the B2 inputs are hydrated locally first.
-            $meshroomObjPath = $this->runMeshroom($workdir, $imageFolder, $processedFolder);
+            $this->throwIfCanceled($job);
+            $meshroomObjPath = $this->runMeshroom($workdir, $imageFolder, $processedFolder, $job);
             $objPath = $objectStorage->uploadFile(
                 ScanObjectKeys::modelObj($job->scan_id),
                 $meshroomObjPath,
@@ -136,7 +139,8 @@ class ProcessScanJob implements ShouldQueue
             $absoluteGlbPath = "{$outputsFolder}/model.glb";
             $absoluteUsdzPath = "{$outputsFolder}/model.usdz";
 
-            $this->runBlenderObjToGlb($meshroomObjPath, $absoluteGlbPath);
+            $this->throwIfCanceled($job);
+            $this->runBlenderObjToGlb($meshroomObjPath, $absoluteGlbPath, $job);
 
             $glbPath = $objectStorage->uploadFile(
                 ScanObjectKeys::modelGlb($job->scan_id),
@@ -157,7 +161,8 @@ class ProcessScanJob implements ShouldQueue
                     'message' => 'Converting GLB to USDZ',
                 ]);
 
-                $this->runUsdzFromGlb($absoluteGlbPath, $absoluteUsdzPath);
+                $this->throwIfCanceled($job);
+                $this->runUsdzFromGlb($absoluteGlbPath, $absoluteUsdzPath, $job);
                 $storedUsdzPath = $objectStorage->uploadFile(
                     ScanObjectKeys::modelUsdz($job->scan_id),
                     $absoluteUsdzPath,
@@ -190,6 +195,14 @@ class ProcessScanJob implements ShouldQueue
                 'status' => 'ready',
             ]);
         } catch (Throwable $e) {
+            if ($job->isCanceled()) {
+                $job->scan()->update([
+                    'status' => 'uploaded',
+                ]);
+
+                return;
+            }
+
             $job->update([
                 'status' => 'error',
                 'progress' => $job->progress ?? 0,
@@ -204,7 +217,7 @@ class ProcessScanJob implements ShouldQueue
         }
     }
 
-    private function runMeshroom(string $workdir, string $imageFolder, string $processedFolder): string
+    private function runMeshroom(string $workdir, string $imageFolder, string $processedFolder, Job $job): string
     {
         $inputFolder = $this->resolveMeshroomInputFolder($imageFolder, $processedFolder);
         $outputFolder = "{$workdir}/meshroom-output";
@@ -229,7 +242,7 @@ class ProcessScanJob implements ShouldQueue
         $process->setTimeout(null);
 
         try {
-            $process->run();
+            $this->runManagedProcess($process, $job);
         } catch (Throwable $e) {
             throw new RuntimeException(
                 $this->formatProcessTail('meshroom failed', $process->getOutput(), $process->getErrorOutput() ?: $e->getMessage()),
@@ -431,7 +444,7 @@ class ProcessScanJob implements ShouldQueue
         return "{$prefix}: {$combined}";
     }
 
-    private function runBlenderObjToGlb(string $inputObjPath, string $outputGlbPath): void
+    private function runBlenderObjToGlb(string $inputObjPath, string $outputGlbPath, Job $job): void
     {
         $blenderBin = (string) env('BLENDER_BIN', 'blender');
         $scriptPath = base_path('scripts/obj_to_glb.py');
@@ -457,7 +470,7 @@ class ProcessScanJob implements ShouldQueue
         $process->setTimeout(null);
 
         try {
-            $process->run();
+            $this->runManagedProcess($process, $job);
         } catch (Throwable $e) {
             throw new RuntimeException(
                 $this->formatProcessTail('blender failed', $process->getOutput(), $process->getErrorOutput() ?: $e->getMessage()),
@@ -489,7 +502,7 @@ class ProcessScanJob implements ShouldQueue
         return is_executable($usdzBin);
     }
 
-    private function runUsdzFromGlb(string $inputGlbPath, string $outputUsdzPath): void
+    private function runUsdzFromGlb(string $inputGlbPath, string $outputUsdzPath, Job $job): void
     {
         $usdzBin = trim((string) env('USDZ_BIN', ''));
 
@@ -510,7 +523,7 @@ class ProcessScanJob implements ShouldQueue
         $process->setTimeout(null);
 
         try {
-            $process->run();
+            $this->runManagedProcess($process, $job);
         } catch (Throwable $e) {
             throw new RuntimeException(
                 $this->formatProcessTail('usdz failed', $process->getOutput(), $process->getErrorOutput() ?: $e->getMessage()),
@@ -527,5 +540,28 @@ class ProcessScanJob implements ShouldQueue
         if (! is_file($outputUsdzPath)) {
             throw new RuntimeException('usdz failed: USDZ output missing');
         }
+    }
+
+    private function throwIfCanceled(Job $job): void
+    {
+        if ($job->isCanceled()) {
+            throw new RuntimeException('Job canceled.');
+        }
+    }
+
+    private function runManagedProcess(Process $process, Job $job): void
+    {
+        $process->start();
+
+        while ($process->isRunning()) {
+            if ($job->isCanceled()) {
+                $process->stop(1, 9);
+                throw new RuntimeException('Job canceled.');
+            }
+
+            usleep(250000);
+        }
+
+        $process->wait();
     }
 }

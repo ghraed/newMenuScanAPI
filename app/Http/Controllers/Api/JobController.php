@@ -8,6 +8,7 @@ use App\Models\Job;
 use App\Models\JobOutput;
 use App\Services\ObjectStorageService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 
 class JobController extends Controller
 {
@@ -50,6 +51,44 @@ class JobController extends Controller
         }
 
         return response()->json($response);
+    }
+
+    public function cancel(string $jobId): JsonResponse
+    {
+        $job = Job::query()->with('scan')->findOrFail($jobId);
+
+        if (in_array($job->status, [Job::STATUS_READY, Job::STATUS_ERROR, Job::STATUS_CANCELED], true)) {
+            return response()->json([
+                'jobId' => $job->id,
+                'status' => $job->status,
+                'progress' => (float) $job->progress,
+                'message' => $job->message,
+            ]);
+        }
+
+        DB::transaction(function () use ($job): void {
+            $job->update([
+                'status' => Job::STATUS_CANCELED,
+                'message' => 'Canceled by user.',
+            ]);
+
+            if ($job->scan) {
+                $nextScanStatus = ($job->type ?? 'model') === 'background'
+                    ? 'uploaded'
+                    : 'uploaded';
+
+                $job->scan->update([
+                    'status' => $nextScanStatus,
+                ]);
+            }
+        });
+
+        return response()->json([
+            'jobId' => $job->id,
+            'status' => Job::STATUS_CANCELED,
+            'progress' => (float) $job->progress,
+            'message' => 'Canceled by user.',
+        ]);
     }
 
     /**

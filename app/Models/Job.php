@@ -12,6 +12,13 @@ class Job extends Model
 {
     use HasFactory, HasUuids;
 
+    public const STATUS_QUEUED = 'queued';
+    public const STATUS_PROCESSING = 'processing';
+    public const STATUS_PARTIAL = 'partial';
+    public const STATUS_READY = 'ready';
+    public const STATUS_ERROR = 'error';
+    public const STATUS_CANCELED = 'canceled';
+
     public $incrementing = false;
 
     protected $keyType = 'string';
@@ -38,5 +45,15 @@ class Job extends Model
     public function jobOutput(): HasOne
     {
         return $this->hasOne(JobOutput::class);
+    }
+
+    public function freshStatus(): ?string
+    {
+        return static::query()->whereKey($this->getKey())->value('status');
+    }
+
+    public function isCanceled(): bool
+    {
+        return $this->freshStatus() === self::STATUS_CANCELED;
     }
 }

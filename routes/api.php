@@ -14,6 +14,7 @@ Route::middleware(RequireApiKey::class)->group(function () {
     Route::get('/scans/{scanId}', [ScanController::class, 'show'])->whereUuid('scanId');
 
     Route::get('/jobs/{jobId}', [JobController::class, 'show'])->whereUuid('jobId');
+    Route::post('/jobs/{jobId}/cancel', [JobController::class, 'cancel'])->whereUuid('jobId');
 
     Route::get('/scans/{scanId}/images/{slot}/rgba', [FileController::class, 'rgba'])
         ->whereUuid('scanId')
@@ -25,4 +26,3 @@ Route::middleware(RequireApiKey::class)->group(function () {
         ->whereIn('type', ['glb', 'usdz', 'preview', 'obj'])
         ->name('api.files.show');
 });
-// test1

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\ScanImage;
 use App\Support\ScanObjectKeys;
+use Closure;
 use RuntimeException;
 use SplQueue;
 use Symfony\Component\Process\Process;
@@ -50,9 +51,11 @@ class MaskService
         $binary = (string) env('REMBG_BIN', 'rembg');
         $process = new Process([$binary, 'i', $preparedInputPath, $outputPath]);
         $process->setTimeout(600);
+        /** @var (Closure(): bool)|null $shouldCancel */
+        $shouldCancel = $options['should_cancel'] ?? null;
 
         try {
-            $process->run();
+            $this->runProcess($process, $shouldCancel);
         } catch (Throwable $e) {
             throw new RuntimeException(
                 $this->formatFailureMessage($slot, $process->getErrorOutput() ?: $e->getMessage()),
@@ -86,6 +89,22 @@ class MaskService
             'key' => $outputKey,
             'local_path' => $outputPath,
         ];
+    }
+
+    private function runProcess(Process $process, ?Closure $shouldCancel = null): void
+    {
+        $process->start();
+
+        while ($process->isRunning()) {
+            if ($shouldCancel && $shouldCancel()) {
+                $process->stop(1, 9);
+                throw new RuntimeException('Job canceled.');
+            }
+
+            usleep(200000);
+        }
+
+        $process->wait();
     }
 
     private function resolveOutputKey(string $scanId, int $slot, string $mode): string
