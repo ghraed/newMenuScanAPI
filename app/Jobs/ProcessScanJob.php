@@ -59,24 +59,32 @@ class ProcessScanJob implements ShouldQueue
                     $localOriginalPath = $this->downloadOriginalImage($image, $imageFolder, $objectStorage);
                     $fallbackPreviewSourcePath ??= $localOriginalPath;
 
-                    $rgba = $maskService->generateRgba($image, [
-                        'workdir' => $workdir,
-                        'input_path' => $localOriginalPath,
-                        'output_path' => "{$processedFolder}/{$image->slot}.png",
-                    ]);
+                    $existingProcessedPath = $this->downloadExistingProcessedImage($image, $processedFolder, $objectStorage);
 
-                    $previewSourcePath ??= $rgba['local_path'];
+                    if ($existingProcessedPath !== null) {
+                        $previewSourcePath ??= $existingProcessedPath;
+                    } else {
+                        $rgba = $maskService->generateRgba($image, [
+                            'workdir' => $workdir,
+                            'input_path' => $localOriginalPath,
+                            'output_path' => "{$processedFolder}/{$image->slot}.png",
+                        ]);
 
-                    $image->update([
-                        'path_rgba' => $rgba['key'],
-                    ]);
+                        $previewSourcePath ??= $rgba['local_path'];
+
+                        $image->update([
+                            'path_rgba' => $rgba['key'],
+                        ]);
+                    }
 
                     $processed = $index + 1;
                     $progress = 0.100 + (($processed / $totalImages) * 0.400);
 
                     $job->update([
                         'progress' => round($progress, 3),
-                        'message' => "Preprocessing images ({$processed}/{$totalImages})",
+                        'message' => $existingProcessedPath !== null
+                            ? "Using existing background removal ({$processed}/{$totalImages})"
+                            : "Preprocessing images ({$processed}/{$totalImages})",
                     ]);
                 }
             } else {
@@ -269,6 +277,27 @@ class ProcessScanJob implements ShouldQueue
         $localPath = "{$imageFolder}/{$image->slot}.{$extension}";
 
         return $objectStorage->downloadStoredPathTo($storedPath, $localPath);
+    }
+
+    private function downloadExistingProcessedImage(
+        ScanImage $image,
+        string $processedFolder,
+        ObjectStorageService $objectStorage
+    ): ?string {
+        $storedPath = trim((string) $image->path_rgba);
+
+        if ($storedPath === '') {
+            return null;
+        }
+
+        $extension = pathinfo($storedPath, PATHINFO_EXTENSION) ?: 'png';
+        $localPath = "{$processedFolder}/{$image->slot}.{$extension}";
+
+        try {
+            return $objectStorage->downloadStoredPathTo($storedPath, $localPath);
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     private function resolveMeshroomInputFolder(string $imageFolder, string $processedFolder): string
