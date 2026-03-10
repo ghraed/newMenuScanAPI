@@ -82,15 +82,24 @@ def _enable_alpha_blending():
 
 
 def _import_obj(filepath):
-    if hasattr(bpy.ops.wm, "obj_import"):
-        bpy.ops.wm.obj_import(filepath=filepath)
-        return
+    errors = []
 
-    if hasattr(bpy.ops.import_scene, "obj"):
+    try:
         bpy.ops.import_scene.obj(filepath=filepath)
         return
+    except Exception as exc:
+        errors.append(f"import_scene.obj: {exc}")
 
-    raise SystemExit("OBJ import operator is not available in this Blender build")
+    try:
+        bpy.ops.wm.obj_import(filepath=filepath)
+        return
+    except Exception as exc:
+        errors.append(f"wm.obj_import: {exc}")
+
+    raise SystemExit(
+        "OBJ import operator is not available in this Blender build. "
+        + " | ".join(errors)
+    )
 
 
 def main():
