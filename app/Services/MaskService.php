@@ -138,6 +138,28 @@ class MaskService
 
         $originalWidth = imagesx($originalImage);
         $originalHeight = imagesy($originalImage);
+
+        // Keep final exports on the original input to avoid quality loss from
+        // crop/resize/jpeg pre-processing. Preview mode stays optimized.
+        if ($mode === 'final') {
+            $selectionContext = $this->buildSelectionContext(
+                $selection,
+                $mode,
+                $originalWidth,
+                $originalHeight,
+                null,
+                $originalWidth,
+                $originalHeight,
+            );
+
+            imagedestroy($originalImage);
+
+            return [
+                'path' => $inputPath,
+                'selectionContext' => $selectionContext,
+            ];
+        }
+
         $cropWindow = $this->resolveCropWindow($selection, $originalWidth, $originalHeight, $mode);
         $croppedImage = null;
         $workingImage = $originalImage;
