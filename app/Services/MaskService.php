@@ -136,27 +136,37 @@ class MaskService
             ];
         }
 
+        [$originalImage, $orientationAdjusted] = $this->normalizeImageOrientation($originalImage, $inputPath);
         $originalWidth = imagesx($originalImage);
         $originalHeight = imagesy($originalImage);
 
-        // Keep final exports on the original input to avoid quality loss from
-        // crop/resize/jpeg pre-processing. Preview mode stays optimized.
+        // Final exports should favor faithful full-frame output over aggressive
+        // object isolation. Keep selection refinement for previews only.
         if ($mode === 'final') {
-            $selectionContext = $this->buildSelectionContext(
-                $selection,
-                $mode,
-                $originalWidth,
-                $originalHeight,
-                null,
-                $originalWidth,
-                $originalHeight,
-            );
+            if (! $orientationAdjusted) {
+                imagedestroy($originalImage);
+
+                return [
+                    'path' => $inputPath,
+                    'selectionContext' => null,
+                ];
+            }
+
+            if (! is_dir($tempDir) && ! mkdir($tempDir, 0775, true) && ! is_dir($tempDir)) {
+                throw new RuntimeException("failed to create temp directory for slot {$slot}");
+            }
+
+            $tempPath = "{$tempDir}/slot-{$slot}-{$mode}.jpg";
+            if (! imagejpeg($originalImage, $tempPath, 100)) {
+                imagedestroy($originalImage);
+                throw new RuntimeException("failed to prepare rembg input for slot {$slot}");
+            }
 
             imagedestroy($originalImage);
 
             return [
-                'path' => $inputPath,
-                'selectionContext' => $selectionContext,
+                'path' => $tempPath,
+                'selectionContext' => null,
             ];
         }
 
@@ -214,6 +224,51 @@ class MaskService
             'path' => $tempPath,
             'selectionContext' => $selectionContext,
         ];
+    }
+
+    /**
+     * @return array{0: \GdImage, 1: bool}
+     */
+    private function normalizeImageOrientation(\GdImage $image, string $inputPath): array
+    {
+        if (! function_exists('exif_read_data')) {
+            return [$image, false];
+        }
+
+        $exif = @exif_read_data($inputPath);
+        $orientation = (int) ($exif['Orientation'] ?? 1);
+
+        return match ($orientation) {
+            2 => [$this->flipImage($image, IMG_FLIP_HORIZONTAL), true],
+            3 => [$this->rotateImage($image, 180), true],
+            4 => [$this->flipImage($image, IMG_FLIP_VERTICAL), true],
+            5 => [$this->rotateImage($this->flipImage($image, IMG_FLIP_HORIZONTAL), -90), true],
+            6 => [$this->rotateImage($image, -90), true],
+            7 => [$this->rotateImage($this->flipImage($image, IMG_FLIP_HORIZONTAL), 90), true],
+            8 => [$this->rotateImage($image, 90), true],
+            default => [$image, false],
+        };
+    }
+
+    private function rotateImage(\GdImage $image, int $degrees): \GdImage
+    {
+        $rotated = imagerotate($image, $degrees, 0);
+        if ($rotated instanceof \GdImage) {
+            imagedestroy($image);
+
+            return $rotated;
+        }
+
+        return $image;
+    }
+
+    private function flipImage(\GdImage $image, int $mode): \GdImage
+    {
+        if (function_exists('imageflip')) {
+            imageflip($image, $mode);
+        }
+
+        return $image;
     }
 
     private function downloadSourceImage(ScanImage $image, string $workdir): string

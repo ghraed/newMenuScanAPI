@@ -9,7 +9,7 @@ use Tests\TestCase;
 
 class MaskServiceTest extends TestCase
 {
-    public function test_final_mode_uses_original_image_without_preprocessing(): void
+    public function test_final_mode_skips_selection_refinement_when_orientation_is_already_normalized(): void
     {
         if (! function_exists('imagecreatetruecolor')) {
             $this->markTestSkipped('GD is not installed.');
@@ -45,9 +45,7 @@ class MaskServiceTest extends TestCase
         );
 
         $this->assertSame($inputPath, $result['path']);
-        $this->assertIsArray($result['selectionContext']);
-        $this->assertSame(2400, $result['selectionContext']['preparedWidth']);
-        $this->assertSame(1600, $result['selectionContext']['preparedHeight']);
+        $this->assertNull($result['selectionContext']);
 
         @unlink($inputPath);
     }
