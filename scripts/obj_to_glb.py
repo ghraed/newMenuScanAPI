@@ -2,6 +2,7 @@ import os
 import sys
 
 import bpy
+from mathutils import Vector
 
 
 def _args_after_double_dash():
@@ -102,13 +103,85 @@ def _import_obj(filepath):
     )
 
 
+def _root_objects():
+    return [obj for obj in bpy.context.scene.objects if obj.parent is None]
+
+
+def _combined_bounds():
+    mesh_objects = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
+    if not mesh_objects:
+        raise SystemExit("No mesh objects were imported from the OBJ file")
+
+    points = []
+    for obj in mesh_objects:
+        matrix = obj.matrix_world
+        points.extend(matrix @ Vector(corner) for corner in obj.bound_box)
+
+    min_corner = Vector(
+        (
+            min(point.x for point in points),
+            min(point.y for point in points),
+            min(point.z for point in points),
+        )
+    )
+    max_corner = Vector(
+        (
+            max(point.x for point in points),
+            max(point.y for point in points),
+            max(point.z for point in points),
+        )
+    )
+    return min_corner, max_corner
+
+
+def _apply_uniform_scale(scale_factor):
+    if scale_factor <= 0:
+        raise SystemExit(f"Invalid scale factor: {scale_factor}")
+
+    for obj in _root_objects():
+        obj.scale = tuple(component * scale_factor for component in obj.scale)
+
+    bpy.context.view_layer.update()
+
+
+def _center_model_on_ground():
+    min_corner, max_corner = _combined_bounds()
+    offset = Vector(
+        (
+            -((min_corner.x + max_corner.x) / 2.0),
+            -((min_corner.y + max_corner.y) / 2.0),
+            -min_corner.z,
+        )
+    )
+
+    for obj in _root_objects():
+        obj.location += offset
+
+    bpy.context.view_layer.update()
+
+
+def _scale_model_to_target_width(target_width_meters):
+    if target_width_meters <= 0:
+        return
+
+    min_corner, max_corner = _combined_bounds()
+    size = max_corner - min_corner
+    horizontal_width = max(size.x, size.y)
+
+    if horizontal_width <= 0:
+        raise SystemExit("Imported OBJ has zero horizontal size; cannot apply target width")
+
+    _apply_uniform_scale(target_width_meters / horizontal_width)
+
+
 def main():
     args = _args_after_double_dash()
-    if len(args) != 2:
-        raise SystemExit("Usage: blender -b -P scripts/obj_to_glb.py -- <input_obj> <output_glb>")
+    if len(args) not in (2, 3):
+        raise SystemExit("Usage: blender -b -P scripts/obj_to_glb.py -- <input_obj> <output_glb> [target_width_meters]")
 
     input_obj = os.path.abspath(args[0])
     output_glb = os.path.abspath(args[1])
+    target_width_meters = float(args[2]) if len(args) == 3 and args[2] else 0.0
     output_dir = os.path.dirname(output_glb)
 
     if not os.path.isfile(input_obj):
@@ -123,6 +196,8 @@ def main():
     obj_dir = os.path.dirname(input_obj)
     _ensure_texture_links(obj_dir)
     _enable_alpha_blending()
+    _scale_model_to_target_width(target_width_meters)
+    _center_model_on_ground()
 
     bpy.ops.export_scene.gltf(
         filepath=output_glb,

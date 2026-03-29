@@ -140,7 +140,12 @@ class ProcessScanJob implements ShouldQueue
             $absoluteUsdzPath = "{$outputsFolder}/model.usdz";
 
             $this->throwIfCanceled($job);
-            $this->runBlenderObjToGlb($meshroomObjPath, $absoluteGlbPath, $job);
+            $this->runBlenderObjToGlb(
+                $meshroomObjPath,
+                $absoluteGlbPath,
+                $job,
+                (float) ($job->scan->scale_meters ?? 0)
+            );
 
             $glbPath = $objectStorage->uploadFile(
                 ScanObjectKeys::modelGlb($job->scan_id),
@@ -444,7 +449,12 @@ class ProcessScanJob implements ShouldQueue
         return "{$prefix}: {$combined}";
     }
 
-    private function runBlenderObjToGlb(string $inputObjPath, string $outputGlbPath, Job $job): void
+    private function runBlenderObjToGlb(
+        string $inputObjPath,
+        string $outputGlbPath,
+        Job $job,
+        float $targetWidthMeters = 0.0
+    ): void
     {
         $blenderBin = (string) env('BLENDER_BIN', 'blender');
         $scriptPath = base_path('scripts/obj_to_glb.py');
@@ -466,6 +476,7 @@ class ProcessScanJob implements ShouldQueue
             '--',
             $inputObjPath,
             $outputGlbPath,
+            number_format(max(0, $targetWidthMeters), 6, '.', ''),
         ]);
         $process->setTimeout(null);
 
