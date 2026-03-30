@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
+    // test
     public function up(): void
     {
         Schema::create('scans', function (Blueprint $table) {
