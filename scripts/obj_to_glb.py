@@ -232,6 +232,11 @@ def _resize_images(max_texture_size):
         target_width = max(1, round(width * scale))
         target_height = max(1, round(height * scale))
         image.scale(target_width, target_height)
+        image.update()
+        try:
+            image.pack()
+        except RuntimeError:
+            pass
 
 
 def main():
