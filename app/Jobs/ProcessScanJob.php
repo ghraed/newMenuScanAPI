@@ -57,7 +57,13 @@ class ProcessScanJob implements ShouldQueue
                 foreach ($images as $index => $image) {
                     $this->throwIfCanceled($job);
                     /** @var ScanImage $image */
-                    $localOriginalPath = $this->downloadOriginalImage($image, $imageFolder, $objectStorage);
+                    $downloadedOriginalPath = $this->downloadOriginalImage($image, $imageFolder, $objectStorage);
+                    $localOriginalPath = $this->prepareMeshroomInputImage(
+                        $maskService,
+                        $downloadedOriginalPath,
+                        $imageFolder,
+                        (int) $image->slot
+                    );
                     $fallbackPreviewSourcePath ??= $localOriginalPath;
 
                     $existingProcessedPath = $this->downloadExistingProcessedImage($image, $processedFolder, $objectStorage);
@@ -297,6 +303,30 @@ class ProcessScanJob implements ShouldQueue
         return $objectStorage->downloadStoredPathTo($storedPath, $localPath);
     }
 
+    private function prepareMeshroomInputImage(
+        MaskService $maskService,
+        string $sourcePath,
+        string $imageFolder,
+        int $slot
+    ): string {
+        $optimizedPath = "{$imageFolder}/{$slot}.jpg";
+
+        try {
+            $resultPath = $maskService->optimizeJpegForPipeline($sourcePath, $optimizedPath, [
+                'max_dimension' => (int) env('MESHROOM_IMAGE_MAX_DIMENSION', env('PIPELINE_IMAGE_MAX_DIMENSION', 2200)),
+                'quality' => (int) env('MESHROOM_IMAGE_JPEG_QUALITY', env('PIPELINE_IMAGE_JPEG_QUALITY', 88)),
+            ]);
+
+            if ($sourcePath !== $resultPath && is_file($sourcePath)) {
+                @unlink($sourcePath);
+            }
+
+            return $resultPath;
+        } catch (Throwable) {
+            return $sourcePath;
+        }
+    }
+
     private function downloadExistingProcessedImage(
         ScanImage $image,
         string $processedFolder,
@@ -477,6 +507,8 @@ class ProcessScanJob implements ShouldQueue
             $inputObjPath,
             $outputGlbPath,
             number_format(max(0, $targetWidthMeters), 6, '.', ''),
+            (string) max(0, (int) env('GLB_TARGET_TRIANGLES', 120000)),
+            (string) max(512, (int) env('GLB_MAX_TEXTURE_SIZE', 2048)),
         ]);
         $process->setTimeout(null);
 

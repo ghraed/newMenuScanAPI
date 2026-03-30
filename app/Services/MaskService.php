@@ -91,6 +91,73 @@ class MaskService
         ];
     }
 
+    public function optimizeJpegForPipeline(string $inputPath, string $outputPath, array $options = []): string
+    {
+        if (! function_exists('imagecreatefromstring')) {
+            if ($inputPath !== $outputPath) {
+                $outputDir = dirname($outputPath);
+                if (! is_dir($outputDir) && ! mkdir($outputDir, 0775, true) && ! is_dir($outputDir)) {
+                    throw new RuntimeException('failed to create optimized image directory');
+                }
+
+                if (! copy($inputPath, $outputPath)) {
+                    throw new RuntimeException('failed to copy optimized image');
+                }
+            }
+
+            return $outputPath;
+        }
+
+        $contents = @file_get_contents($inputPath);
+        $image = $contents !== false ? @imagecreatefromstring($contents) : false;
+
+        if (! $image instanceof \GdImage) {
+            if ($inputPath !== $outputPath) {
+                $outputDir = dirname($outputPath);
+                if (! is_dir($outputDir) && ! mkdir($outputDir, 0775, true) && ! is_dir($outputDir)) {
+                    throw new RuntimeException('failed to create optimized image directory');
+                }
+
+                if (! copy($inputPath, $outputPath)) {
+                    throw new RuntimeException('failed to copy optimized image');
+                }
+            }
+
+            return $outputPath;
+        }
+
+        [$image] = $this->normalizeImageOrientation($image, $inputPath);
+        $maxDimension = max(640, (int) ($options['max_dimension'] ?? env('PIPELINE_IMAGE_MAX_DIMENSION', 2200)));
+        $quality = $this->clampInt((int) ($options['quality'] ?? env('PIPELINE_IMAGE_JPEG_QUALITY', 88)), 60, 100);
+        $resizedImage = $this->resizeIfNeeded($image, $maxDimension);
+        $outputDir = dirname($outputPath);
+
+        if (! is_dir($outputDir) && ! mkdir($outputDir, 0775, true) && ! is_dir($outputDir)) {
+            if ($resizedImage !== $image) {
+                imagedestroy($resizedImage);
+            }
+            imagedestroy($image);
+            throw new RuntimeException('failed to create optimized image directory');
+        }
+
+        imageinterlace($resizedImage, true);
+
+        if (! imagejpeg($resizedImage, $outputPath, $quality)) {
+            if ($resizedImage !== $image) {
+                imagedestroy($resizedImage);
+            }
+            imagedestroy($image);
+            throw new RuntimeException('failed to write optimized image');
+        }
+
+        if ($resizedImage !== $image) {
+            imagedestroy($resizedImage);
+        }
+        imagedestroy($image);
+
+        return $outputPath;
+    }
+
     private function runProcess(Process $process, ?Closure $shouldCancel = null): void
     {
         $process->start();
@@ -143,26 +210,19 @@ class MaskService
         // Final exports should favor faithful full-frame output over aggressive
         // object isolation. Keep selection refinement for previews only.
         if ($mode === 'final') {
-            if (! $orientationAdjusted) {
-                imagedestroy($originalImage);
-
-                return [
-                    'path' => $inputPath,
-                    'selectionContext' => null,
-                ];
-            }
-
             if (! is_dir($tempDir) && ! mkdir($tempDir, 0775, true) && ! is_dir($tempDir)) {
+                imagedestroy($originalImage);
                 throw new RuntimeException("failed to create temp directory for slot {$slot}");
             }
 
             $tempPath = "{$tempDir}/slot-{$slot}-{$mode}.jpg";
-            if (! imagejpeg($originalImage, $tempPath, 100)) {
-                imagedestroy($originalImage);
-                throw new RuntimeException("failed to prepare rembg input for slot {$slot}");
-            }
-
             imagedestroy($originalImage);
+
+            try {
+                $this->optimizeJpegForPipeline($inputPath, $tempPath);
+            } catch (Throwable $error) {
+                throw new RuntimeException("failed to prepare rembg input for slot {$slot}", previous: $error);
+            }
 
             return [
                 'path' => $tempPath,
@@ -197,6 +257,13 @@ class MaskService
         );
 
         if (! is_dir($tempDir) && ! mkdir($tempDir, 0775, true) && ! is_dir($tempDir)) {
+            if ($resizedImage !== $workingImage) {
+                imagedestroy($resizedImage);
+            }
+            if ($croppedImage instanceof \GdImage) {
+                imagedestroy($croppedImage);
+            }
+            imagedestroy($originalImage);
             throw new RuntimeException("failed to create temp directory for slot {$slot}");
         }
 

@@ -107,8 +107,12 @@ def _root_objects():
     return [obj for obj in bpy.context.scene.objects if obj.parent is None]
 
 
+def _mesh_objects():
+    return [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
+
+
 def _combined_bounds():
-    mesh_objects = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
+    mesh_objects = _mesh_objects()
     if not mesh_objects:
         raise SystemExit("No mesh objects were imported from the OBJ file")
 
@@ -174,14 +178,81 @@ def _scale_model_to_target_width(target_width_meters):
     _apply_uniform_scale(target_width_meters / horizontal_width)
 
 
+def _triangle_count_for_mesh(mesh):
+    return sum(max(0, len(polygon.vertices) - 2) for polygon in mesh.polygons)
+
+
+def _total_triangle_count():
+    return sum(_triangle_count_for_mesh(obj.data) for obj in _mesh_objects())
+
+
+def _decimate_meshes(target_triangles):
+    if target_triangles <= 0:
+        return
+
+    mesh_objects = _mesh_objects()
+    current_triangles = _total_triangle_count()
+
+    if not mesh_objects or current_triangles <= 0 or current_triangles <= target_triangles:
+        return
+
+    ratio = max(0.05, min(1.0, target_triangles / current_triangles))
+
+    bpy.ops.object.select_all(action="DESELECT")
+
+    for obj in mesh_objects:
+        bpy.context.view_layer.objects.active = obj
+        obj.select_set(True)
+        modifier = obj.modifiers.new(name="ReduceForGlbExport", type="DECIMATE")
+        modifier.ratio = ratio
+        if hasattr(modifier, "use_collapse_triangulate"):
+            modifier.use_collapse_triangulate = True
+        bpy.ops.object.modifier_apply(modifier=modifier.name)
+        obj.select_set(False)
+
+    bpy.context.view_layer.update()
+
+
+def _resize_images(max_texture_size):
+    if max_texture_size <= 0:
+        return
+
+    for image in bpy.data.images:
+        if image.source != "FILE":
+            continue
+
+        width = int(image.size[0]) if len(image.size) > 0 else 0
+        height = int(image.size[1]) if len(image.size) > 1 else 0
+        largest = max(width, height)
+
+        if largest <= 0 or largest <= max_texture_size:
+            continue
+
+        scale = max_texture_size / largest
+        target_width = max(1, round(width * scale))
+        target_height = max(1, round(height * scale))
+        image.scale(target_width, target_height)
+
+
 def main():
     args = _args_after_double_dash()
-    if len(args) not in (2, 3):
-        raise SystemExit("Usage: blender -b -P scripts/obj_to_glb.py -- <input_obj> <output_glb> [target_width_meters]")
+    if len(args) not in (2, 3, 4, 5):
+        raise SystemExit(
+            "Usage: blender -b -P scripts/obj_to_glb.py -- "
+            "<input_obj> <output_glb> [target_width_meters] [target_triangles] [max_texture_size]"
+        )
 
     input_obj = os.path.abspath(args[0])
     output_glb = os.path.abspath(args[1])
-    target_width_meters = float(args[2]) if len(args) == 3 and args[2] else 0.0
+    target_width_meters = float(args[2]) if len(args) >= 3 and args[2] else 0.0
+    if len(args) >= 4 and args[3]:
+        target_triangles = int(float(args[3]))
+    else:
+        target_triangles = 0
+    if len(args) >= 5 and args[4]:
+        max_texture_size = int(float(args[4]))
+    else:
+        max_texture_size = 0
     output_dir = os.path.dirname(output_glb)
 
     if not os.path.isfile(input_obj):
@@ -198,6 +269,8 @@ def main():
     _enable_alpha_blending()
     _scale_model_to_target_width(target_width_meters)
     _center_model_on_ground()
+    _decimate_meshes(target_triangles)
+    _resize_images(max_texture_size)
 
     bpy.ops.export_scene.gltf(
         filepath=output_glb,
