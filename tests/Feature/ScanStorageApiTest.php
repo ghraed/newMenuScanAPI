@@ -38,15 +38,22 @@ class ScanStorageApiTest extends TestCase
 
     public function test_scan_image_uploads_are_stored_on_b2_and_persisted_as_object_keys(): void
     {
+        [, $restaurant, $token] = $this->createRestaurantAuthContext();
+
         $scan = Scan::query()->create([
             'device_id' => 'device-storage-1',
+            'restaurant_id' => $restaurant->id,
+            'created_by_user_id' => $restaurant->user_id,
             'target_type' => 'dish',
             'scale_meters' => 0.24,
             'slots_total' => 24,
             'status' => 'draft',
         ]);
 
-        $response = $this->postJson("/api/scans/{$scan->id}/images", [
+        $response = $this->withHeaders([
+            'Accept' => 'application/json',
+            'Authorization' => "Bearer {$token}",
+        ])->post("/api/scans/{$scan->id}/images", [
             'slot' => 0,
             'heading' => 15,
             'image' => UploadedFile::fake()->image('capture.jpg'),
@@ -67,8 +74,12 @@ class ScanStorageApiTest extends TestCase
 
     public function test_job_status_and_download_endpoint_expose_signed_b2_urls(): void
     {
+        [, $restaurant, $token] = $this->createRestaurantAuthContext();
+
         $scan = Scan::query()->create([
             'device_id' => 'device-storage-2',
+            'restaurant_id' => $restaurant->id,
+            'created_by_user_id' => $restaurant->user_id,
             'target_type' => 'dish',
             'scale_meters' => 0.24,
             'slots_total' => 24,
@@ -91,7 +102,7 @@ class ScanStorageApiTest extends TestCase
         Storage::disk('b2')->put($output->glb_path, 'glb-data');
         Storage::disk('b2')->put($output->preview_path, 'preview-data');
 
-        $this->getJson("/api/jobs/{$job->id}")
+        $this->getJson("/api/jobs/{$job->id}", ['Authorization' => "Bearer {$token}"])
             ->assertOk()
             ->assertJsonPath(
                 'outputs.glbUrl',
@@ -106,7 +117,7 @@ class ScanStorageApiTest extends TestCase
                 "https://signed.example/scans/{$scan->id}/outputs/preview.jpg"
             );
 
-        $this->get("/api/files/{$scan->id}/glb")
+        $this->get("/api/files/{$scan->id}/glb", ['Authorization' => "Bearer {$token}"])
             ->assertRedirect("https://signed.example/scans/{$scan->id}/outputs/model.glb");
     }
 }

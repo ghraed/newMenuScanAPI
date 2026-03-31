@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\DishAsset;
 use App\Models\Job;
 use App\Models\JobOutput;
 use App\Models\ScanImage;
@@ -14,6 +15,8 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Throwable;
@@ -196,6 +199,18 @@ class ProcessScanJob implements ShouldQueue
                 ]
             );
 
+            $this->syncDishAssets(
+                (int) $job->scan->dish_id,
+                (string) $job->scan_id,
+                $glbPath,
+                $storedUsdzPath,
+                $previewPath,
+                $absoluteGlbPath,
+                $storedUsdzPath ? $absoluteUsdzPath : null,
+                $previewPath ? $previewLocalPath : null,
+                $objectStorage,
+            );
+
             $job->update([
                 'status' => 'ready',
                 'progress' => 1.000,
@@ -289,6 +304,133 @@ class ProcessScanJob implements ShouldQueue
         }
 
         return $workdir;
+    }
+
+    private function syncDishAssets(
+        int $dishId,
+        string $scanId,
+        string $glbPath,
+        ?string $usdzPath,
+        ?string $previewPath,
+        ?string $glbLocalPath,
+        ?string $usdzLocalPath,
+        ?string $previewLocalPath,
+        ObjectStorageService $objectStorage
+    ): void {
+        if ($dishId <= 0) {
+            return;
+        }
+
+        $storageDisk = $objectStorage->diskName();
+
+        $this->replaceDishAsset(
+            dishId: $dishId,
+            assetType: 'glb',
+            storageDisk: $storageDisk,
+            storedPath: $glbPath,
+            mimeType: 'model/gltf-binary',
+            localPath: $glbLocalPath,
+            scanId: $scanId,
+        );
+
+        if ($usdzPath) {
+            $this->replaceDishAsset(
+                dishId: $dishId,
+                assetType: 'usdz',
+                storageDisk: $storageDisk,
+                storedPath: $usdzPath,
+                mimeType: 'model/vnd.usdz+zip',
+                localPath: $usdzLocalPath,
+                scanId: $scanId,
+            );
+        }
+
+        if ($previewPath) {
+            $this->replaceDishAsset(
+                dishId: $dishId,
+                assetType: 'preview_image',
+                storageDisk: $storageDisk,
+                storedPath: $previewPath,
+                mimeType: 'image/jpeg',
+                localPath: $previewLocalPath,
+                scanId: $scanId,
+            );
+        }
+    }
+
+    private function replaceDishAsset(
+        int $dishId,
+        string $assetType,
+        string $storageDisk,
+        string $storedPath,
+        string $mimeType,
+        ?string $localPath,
+        string $scanId
+    ): void {
+        DishAsset::query()
+            ->where('dish_id', $dishId)
+            ->where('asset_type', $assetType)
+            ->get()
+            ->each(function (DishAsset $existingAsset): void {
+                $this->deleteExistingAssetFile($existingAsset);
+                $existingAsset->delete();
+            });
+
+        $asset = DishAsset::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'dish_id' => $dishId,
+            'asset_type' => $assetType,
+            'storage_disk' => $storageDisk,
+            'file_path' => $storedPath,
+            'glb_path' => $assetType === 'glb' ? $storedPath : null,
+            'usdz_path' => $assetType === 'usdz' ? $storedPath : null,
+            'file_url' => '',
+            'file_size' => $this->resolveLocalFileSize($localPath),
+            'mime_type' => $mimeType,
+            'metadata' => [
+                'source' => 'scan_pipeline',
+                'scan_id' => $scanId,
+                'uploaded_at' => now()->toIso8601String(),
+            ],
+        ]);
+
+        $asset->update([
+            'file_url' => $this->buildMenuAssetUrl((int) $asset->id),
+        ]);
+    }
+
+    private function deleteExistingAssetFile(DishAsset $asset): void
+    {
+        if (! $asset->file_path) {
+            return;
+        }
+
+        $disk = $asset->storage_disk ?: 'public';
+
+        try {
+            Storage::disk($disk)->delete($asset->file_path);
+        } catch (Throwable) {
+            // Keep asset replacement resilient if the old file is already gone.
+        }
+    }
+
+    private function buildMenuAssetUrl(int $assetId): string
+    {
+        $baseUrl = rtrim((string) env('MENU_API_URL', ''), '/');
+        $path = "/api/assets/{$assetId}/file";
+
+        return $baseUrl === '' ? $path : $baseUrl.$path;
+    }
+
+    private function resolveLocalFileSize(?string $localPath): ?int
+    {
+        if (! $localPath || ! is_file($localPath)) {
+            return null;
+        }
+
+        $size = @filesize($localPath);
+
+        return is_int($size) ? $size : null;
     }
 
     private function downloadOriginalImage(

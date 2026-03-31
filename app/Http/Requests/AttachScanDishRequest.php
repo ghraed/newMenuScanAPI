@@ -4,7 +4,7 @@ namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class ShowJobRequest extends FormRequest
+class AttachScanDishRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -14,14 +14,15 @@ class ShowJobRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         $this->merge([
-            'jobId' => $this->route('jobId'),
+            'scanId' => $this->route('scanId'),
         ]);
     }
 
     public function rules(): array
     {
         return [
-            'jobId' => ['required', 'uuid', 'exists:scan_jobs,id'],
+            'scanId' => ['required', 'uuid', 'exists:scans,id'],
+            'dishId' => ['required', 'integer', 'exists:dishes,id'],
         ];
     }
 }

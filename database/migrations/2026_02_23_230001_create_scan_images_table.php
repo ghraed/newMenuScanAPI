@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasTable('scan_images')) {
+            return;
+        }
+
         Schema::create('scan_images', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->uuid('scan_id');

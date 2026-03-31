@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\AttachScanDishRequest;
 use App\Http\Requests\StartBackgroundRemovalRequest;
 use App\Http\Requests\ShowScanRequest;
 use App\Http\Requests\StoreScanImageRequest;
@@ -10,6 +11,7 @@ use App\Http\Requests\StoreScanRequest;
 use App\Http\Requests\SubmitScanRequest;
 use App\Jobs\ProcessBackgroundRemovalJob;
 use App\Jobs\ProcessScanJob;
+use App\Models\Dish;
 use App\Models\Job;
 use App\Models\JobOutput;
 use App\Models\Scan;
@@ -28,8 +30,26 @@ class ScanController extends Controller
 
     public function store(StoreScanRequest $request): JsonResponse
     {
+        $user = $request->user();
+        $restaurant = $user?->restaurant;
+
+        if (! $user || ! $restaurant) {
+            return response()->json([
+                'message' => 'No restaurant is linked to this account.',
+            ], 403);
+        }
+
+        $dish = null;
+        if ($request->filled('dishId')) {
+            $dish = Dish::query()->findOrFail($request->integer('dishId'));
+            $this->assertDishBelongsToRestaurant($dish, $restaurant->id);
+        }
+
         $scan = Scan::query()->create([
             'device_id' => $request->input('deviceId'),
+            'restaurant_id' => $restaurant->id,
+            'created_by_user_id' => $user->id,
+            'dish_id' => $dish?->id,
             'target_type' => $request->input('targetType'),
             'scale_meters' => $request->input('scaleMeters'),
             'slots_total' => $request->input('slotsTotal', 24),
@@ -37,13 +57,32 @@ class ScanController extends Controller
 
         return response()->json([
             'scanId' => $scan->id,
+            'dishId' => $scan->dish_id,
         ], 201);
     }
 
+    public function attachDish(AttachScanDishRequest $request, string $scanId): JsonResponse
+    {
+        $scan = Scan::query()->findOrFail($scanId);
+        $this->assertScanBelongsToCurrentUser($scan, $request);
+
+        $dish = Dish::query()->findOrFail($request->integer('dishId'));
+        $this->assertDishBelongsToRestaurant($dish, $scan->restaurant_id);
+
+        $scan->update([
+            'dish_id' => $dish->id,
+        ]);
+
+        return response()->json([
+            'scanId' => $scan->id,
+            'dishId' => $scan->dish_id,
+        ]);
+    }
 
     public function storeImage(StoreScanImageRequest $request, string $scanId): JsonResponse
     {
         $scan = Scan::query()->findOrFail($scanId);
+        $this->assertScanBelongsToCurrentUser($scan, $request);
 
         $slot = (int) $request->integer('slot');
         $path = ScanObjectKeys::imageForSlot($scan->id, $slot);
@@ -76,6 +115,7 @@ class ScanController extends Controller
     public function preprocess(StartBackgroundRemovalRequest $request, string $scanId): JsonResponse
     {
         $scan = Scan::query()->with('scanImages')->findOrFail($scanId);
+        $this->assertScanBelongsToCurrentUser($scan, $request);
         $images = $scan->scanImages->sortBy('slot')->values();
 
         if ($images->isEmpty()) {
@@ -150,6 +190,15 @@ class ScanController extends Controller
 
     public function submit(SubmitScanRequest $request, string $scanId): JsonResponse
     {
+        $scan = Scan::query()->findOrFail($scanId);
+        $this->assertScanBelongsToCurrentUser($scan, $request);
+
+        if (! $scan->dish_id) {
+            return response()->json([
+                'message' => 'Select or create a dish before generating the 3D model.',
+            ], 422);
+        }
+
         $job = DB::transaction(function () use ($scanId) {
             $scan = Scan::query()->lockForUpdate()->findOrFail($scanId);
 
@@ -183,6 +232,7 @@ class ScanController extends Controller
                 $query->latest();
             }, 'jobs.jobOutput'])
             ->findOrFail($scanId);
+        $this->assertScanBelongsToCurrentUser($scan, $request);
 
         $latestOutputJob = $scan->jobs->first(function (Job $job) {
             return $job->jobOutput && $job->jobOutput->availablePaths() !== [];
@@ -194,6 +244,9 @@ class ScanController extends Controller
             'targetType' => $scan->target_type,
             'scaleMeters' => (float) $scan->scale_meters,
             'slotsTotal' => $scan->slots_total,
+            'restaurantId' => $scan->restaurant_id,
+            'createdByUserId' => $scan->created_by_user_id,
+            'dishId' => $scan->dish_id,
             'status' => $scan->status,
             'imagesCount' => $scan->scan_images_count,
         ];
@@ -232,5 +285,21 @@ class ScanController extends Controller
     private function imageHasPreviewAsset(ScanImage $image): bool
     {
         return $image->path_rgba !== null || $image->path_mask !== null;
+    }
+
+    private function assertScanBelongsToCurrentUser(Scan $scan, \Illuminate\Http\Request $request): void
+    {
+        $ownerRestaurantId = $request->user()?->restaurant?->id;
+
+        if (! $ownerRestaurantId || (int) $scan->restaurant_id !== (int) $ownerRestaurantId) {
+            abort(404);
+        }
+    }
+
+    private function assertDishBelongsToRestaurant(Dish $dish, int $restaurantId): void
+    {
+        if ((int) $dish->restaurant_id !== (int) $restaurantId) {
+            abort(404);
+        }
     }
 }

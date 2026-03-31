@@ -12,6 +12,8 @@ class Job extends Model
 {
     use HasFactory, HasUuids;
 
+    protected $table = 'scan_jobs';
+
     public const STATUS_QUEUED = 'queued';
     public const STATUS_PROCESSING = 'processing';
     public const STATUS_PARTIAL = 'partial';

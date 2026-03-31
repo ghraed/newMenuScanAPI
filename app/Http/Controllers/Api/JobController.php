@@ -20,6 +20,7 @@ class JobController extends Controller
     public function show(ShowJobRequest $request, string $jobId): JsonResponse
     {
         $job = Job::query()->with(['jobOutput', 'scan.scanImages'])->findOrFail($jobId);
+        $this->assertJobBelongsToCurrentUser($job, $request);
 
         $response = [
             'status' => $job->status,
@@ -56,6 +57,7 @@ class JobController extends Controller
     public function cancel(string $jobId): JsonResponse
     {
         $job = Job::query()->with('scan')->findOrFail($jobId);
+        $this->assertJobBelongsToCurrentUser($job, request());
 
         if (in_array($job->status, [Job::STATUS_READY, Job::STATUS_ERROR, Job::STATUS_CANCELED], true)) {
             return response()->json([
@@ -111,5 +113,14 @@ class JobController extends Controller
         }
 
         return $outputs;
+    }
+
+    private function assertJobBelongsToCurrentUser(Job $job, \Illuminate\Http\Request $request): void
+    {
+        $ownerRestaurantId = $request->user()?->restaurant?->id;
+
+        if (! $ownerRestaurantId || ! $job->scan || (int) $job->scan->restaurant_id !== (int) $ownerRestaurantId) {
+            abort(404);
+        }
     }
 }

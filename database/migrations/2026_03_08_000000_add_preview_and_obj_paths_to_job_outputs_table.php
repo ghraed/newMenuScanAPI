@@ -8,16 +8,13 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('job_outputs', function (Blueprint $table) {
-            $table->string('preview_path')->nullable()->after('usdz_path');
-            $table->string('obj_path')->nullable()->after('preview_path');
-        });
+        if (! Schema::hasTable('scan_job_outputs')) {
+            return;
+        }
     }
 
     public function down(): void
     {
-        Schema::table('job_outputs', function (Blueprint $table) {
-            $table->dropColumn(['preview_path', 'obj_path']);
-        });
+        //
     }
 };

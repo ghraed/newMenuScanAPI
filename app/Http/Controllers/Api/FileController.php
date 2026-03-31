@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\DownloadScanFileRequest;
 use App\Models\Job;
+use App\Models\Scan;
 use App\Models\ScanImage;
 use App\Services\ObjectStorageService;
+use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\Storage;
@@ -26,6 +28,9 @@ class FileController extends Controller
         string $type
     ): StreamedResponse|BinaryFileResponse|RedirectResponse
     {
+        $scan = Scan::query()->findOrFail($scanId);
+        $this->assertScanBelongsToCurrentUser($scan, $request);
+
         $job = Job::query()
             ->with('jobOutput')
             ->where('scan_id', $scanId)
@@ -44,8 +49,11 @@ class FileController extends Controller
         return $this->responseForStoredPath($job->jobOutput->pathForType($type));
     }
 
-    public function rgba(string $scanId, int $slot): StreamedResponse|BinaryFileResponse|RedirectResponse
+    public function rgba(Request $request, string $scanId, int $slot): StreamedResponse|BinaryFileResponse|RedirectResponse
     {
+        $scan = Scan::query()->findOrFail($scanId);
+        $this->assertScanBelongsToCurrentUser($scan, $request);
+
         $image = ScanImage::query()
             ->where('scan_id', $scanId)
             ->where('slot', $slot)
@@ -96,5 +104,14 @@ class FileController extends Controller
         }
 
         return Storage::disk('local')->response($path, null, $headers);
+    }
+
+    private function assertScanBelongsToCurrentUser(Scan $scan, Request $request): void
+    {
+        $ownerRestaurantId = $request->user()?->restaurant?->id;
+
+        if (! $ownerRestaurantId || (int) $scan->restaurant_id !== (int) $ownerRestaurantId) {
+            abort(404);
+        }
     }
 }

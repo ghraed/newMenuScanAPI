@@ -11,6 +11,8 @@ class JobOutput extends Model
 {
     use HasFactory, HasUuids;
 
+    protected $table = 'scan_job_outputs';
+
     public $incrementing = false;
 
     protected $keyType = 'string';

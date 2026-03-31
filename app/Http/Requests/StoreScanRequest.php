@@ -15,7 +15,8 @@ class StoreScanRequest extends FormRequest
     {
         return [
             'deviceId' => ['nullable', 'string', 'max:255'],
-            'targetType' => ['required', 'string', 'in:dish'],
+            'dishId' => ['nullable', 'integer', 'exists:dishes,id'],
+            'targetType' => ['required', 'string', 'in:dish,juice'],
             'scaleMeters' => ['required', 'numeric'],
             'slotsTotal' => ['nullable', 'integer', 'min:1'],
         ];
