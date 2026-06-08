@@ -96,10 +96,12 @@ class ScanStorageApiTest extends TestCase
         $output = JobOutput::query()->create([
             'job_id' => $job->id,
             'glb_path' => "scans/{$scan->id}/outputs/model.glb",
+            'usdz_path' => "scans/{$scan->id}/outputs/model.usdz",
             'preview_path' => "scans/{$scan->id}/outputs/preview.jpg",
         ]);
 
         Storage::disk('b2')->put($output->glb_path, 'glb-data');
+        Storage::disk('b2')->put($output->usdz_path, 'usdz-data');
         Storage::disk('b2')->put($output->preview_path, 'preview-data');
 
         $this->getJson("/api/jobs/{$job->id}", ['Authorization' => "Bearer {$token}"])
@@ -113,11 +115,22 @@ class ScanStorageApiTest extends TestCase
                 "https://signed.example/scans/{$scan->id}/outputs/model.glb"
             )
             ->assertJsonPath(
+                'outputs.usdzUrl',
+                route('api.files.show', ['scanId' => $scan->id, 'type' => 'usdz'])
+            )
+            ->assertJsonPath(
+                'outputs.usdzSignedUrl',
+                "https://signed.example/scans/{$scan->id}/outputs/model.usdz"
+            )
+            ->assertJsonPath(
                 'outputs.previewSignedUrl',
                 "https://signed.example/scans/{$scan->id}/outputs/preview.jpg"
             );
 
         $this->get("/api/files/{$scan->id}/glb", ['Authorization' => "Bearer {$token}"])
             ->assertRedirect("https://signed.example/scans/{$scan->id}/outputs/model.glb");
+
+        $this->get("/api/files/{$scan->id}/usdz", ['Authorization' => "Bearer {$token}"])
+            ->assertRedirect("https://signed.example/scans/{$scan->id}/outputs/model.usdz");
     }
 }

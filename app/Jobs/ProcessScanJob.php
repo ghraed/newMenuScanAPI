@@ -167,27 +167,23 @@ class ProcessScanJob implements ShouldQueue
                 'message' => "meshroom_obj={$meshroomObjPath}",
             ]);
 
-            $storedUsdzPath = null;
+            $job->update([
+                'progress' => 0.985,
+                'message' => 'Converting GLB to USDZ',
+            ]);
 
-            if ($this->shouldGenerateUsdz()) {
-                $job->update([
-                    'progress' => 0.985,
-                    'message' => 'Converting GLB to USDZ',
-                ]);
+            $this->throwIfCanceled($job);
+            $this->runUsdzFromGlb($absoluteGlbPath, $absoluteUsdzPath, $job);
+            $storedUsdzPath = $objectStorage->uploadFile(
+                ScanObjectKeys::modelUsdz($job->scan_id),
+                $absoluteUsdzPath,
+                ['ContentType' => 'model/vnd.usdz+zip']
+            );
 
-                $this->throwIfCanceled($job);
-                $this->runUsdzFromGlb($absoluteGlbPath, $absoluteUsdzPath, $job);
-                $storedUsdzPath = $objectStorage->uploadFile(
-                    ScanObjectKeys::modelUsdz($job->scan_id),
-                    $absoluteUsdzPath,
-                    ['ContentType' => 'model/vnd.usdz+zip']
-                );
-
-                $job->update([
-                    'progress' => 0.995,
-                    'message' => "meshroom_obj={$meshroomObjPath}",
-                ]);
-            }
+            $job->update([
+                'progress' => 0.995,
+                'message' => "meshroom_obj={$meshroomObjPath}",
+            ]);
 
             JobOutput::query()->updateOrCreate(
                 ['job_id' => $job->id],
@@ -676,23 +672,12 @@ class ProcessScanJob implements ShouldQueue
         }
     }
 
-    private function shouldGenerateUsdz(): bool
-    {
-        $usdzBin = trim((string) env('USDZ_BIN', ''));
-
-        if ($usdzBin === '') {
-            return false;
-        }
-
-        return is_executable($usdzBin);
-    }
-
     private function runUsdzFromGlb(string $inputGlbPath, string $outputUsdzPath, Job $job): void
     {
         $usdzBin = trim((string) env('USDZ_BIN', ''));
 
         if ($usdzBin === '' || ! is_executable($usdzBin)) {
-            throw new RuntimeException('usdz failed: USDZ_BIN is not executable');
+            throw new RuntimeException('usdz failed: USDZ_BIN is missing or not executable');
         }
 
         $outputDir = dirname($outputUsdzPath);
