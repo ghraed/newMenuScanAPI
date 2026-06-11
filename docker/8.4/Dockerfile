@@ -72,7 +72,7 @@ EXPOSE 80/tcp
 
 ENTRYPOINT ["start-container"]
 
-ENV PATH="/opt/rembg-env/bin:$PATH"
+ENV PATH="/opt/rembg-env/bin:/opt/usd-tools-env/bin:$PATH"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -85,8 +85,11 @@ RUN apt-get update \
         libgl1 \
         libglib2.0-0 \
     && python3 -m venv /opt/rembg-env \
+    && python3 -m venv /opt/usd-tools-env \
     && /opt/rembg-env/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/usd-tools-env/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/rembg-env/bin/pip install --no-cache-dir "rembg[gpu,cli]" \
+    && /opt/usd-tools-env/bin/pip install --no-cache-dir "usd-core==26.5" \
     && mkdir -p /opt/meshroom \
     && wget -O /tmp/Meshroom-2023.3.0-linux.tar.gz "https://github.com/alicevision/Meshroom/releases/download/v2023.3.0/Meshroom-2023.3.0-linux.tar.gz" \
     && tar -xzf /tmp/Meshroom-2023.3.0-linux.tar.gz -C /opt/meshroom --strip-components=1 \

@@ -133,4 +133,43 @@ class ScanStorageApiTest extends TestCase
         $this->get("/api/files/{$scan->id}/usdz", ['Authorization' => "Bearer {$token}"])
             ->assertRedirect("https://signed.example/scans/{$scan->id}/outputs/model.usdz");
     }
+
+    public function test_job_status_can_return_ready_glb_without_usdz_output(): void
+    {
+        [, $restaurant, $token] = $this->createRestaurantAuthContext();
+
+        $scan = Scan::query()->create([
+            'device_id' => 'device-storage-3',
+            'restaurant_id' => $restaurant->id,
+            'created_by_user_id' => $restaurant->user_id,
+            'target_type' => 'dish',
+            'scale_meters' => 0.24,
+            'slots_total' => 24,
+            'status' => 'ready',
+        ]);
+
+        $job = Job::query()->create([
+            'scan_id' => $scan->id,
+            'type' => 'model',
+            'status' => 'ready',
+            'progress' => 1,
+            'message' => '3D model ready. USDZ export unavailable: missing converter.',
+        ]);
+
+        $output = JobOutput::query()->create([
+            'job_id' => $job->id,
+            'glb_path' => "scans/{$scan->id}/outputs/model.glb",
+            'preview_path' => "scans/{$scan->id}/outputs/preview.jpg",
+        ]);
+
+        Storage::disk('b2')->put($output->glb_path, 'glb-data');
+        Storage::disk('b2')->put($output->preview_path, 'preview-data');
+
+        $this->getJson("/api/jobs/{$job->id}", ['Authorization' => "Bearer {$token}"])
+            ->assertOk()
+            ->assertJsonPath('status', 'ready')
+            ->assertJsonPath('outputs.glbUrl', route('api.files.show', ['scanId' => $scan->id, 'type' => 'glb']))
+            ->assertJsonMissingPath('outputs.usdzUrl')
+            ->assertJsonPath('message', '3D model ready. USDZ export unavailable: missing converter.');
+    }
 }

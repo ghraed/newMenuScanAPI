@@ -15,6 +15,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -161,6 +162,8 @@ class ProcessScanJob implements ShouldQueue
                 $absoluteGlbPath,
                 ['ContentType' => 'model/gltf-binary']
             );
+            $storedUsdzPath = null;
+            $usdzWarning = null;
 
             $job->update([
                 'progress' => 0.970,
@@ -173,16 +176,31 @@ class ProcessScanJob implements ShouldQueue
             ]);
 
             $this->throwIfCanceled($job);
-            $this->runUsdzFromGlb($absoluteGlbPath, $absoluteUsdzPath, $job);
-            $storedUsdzPath = $objectStorage->uploadFile(
-                ScanObjectKeys::modelUsdz($job->scan_id),
-                $absoluteUsdzPath,
-                ['ContentType' => 'model/vnd.usdz+zip']
-            );
+            try {
+                $this->runUsdzFromGlb($absoluteGlbPath, $absoluteUsdzPath, $job);
+                $storedUsdzPath = $objectStorage->uploadFile(
+                    ScanObjectKeys::modelUsdz($job->scan_id),
+                    $absoluteUsdzPath,
+                    ['ContentType' => 'model/vnd.usdz+zip']
+                );
+            } catch (Throwable $usdzError) {
+                if ($job->isCanceled()) {
+                    throw $usdzError;
+                }
+
+                $usdzWarning = $this->summarizeUsdzWarning($usdzError->getMessage());
+
+                Log::warning('USDZ conversion failed after GLB succeeded', [
+                    'job_id' => $job->id,
+                    'scan_id' => $job->scan_id,
+                    'glb_path' => $glbPath,
+                    'error' => $usdzError->getMessage(),
+                ]);
+            }
 
             $job->update([
                 'progress' => 0.995,
-                'message' => "meshroom_obj={$meshroomObjPath}",
+                'message' => $this->buildReadyMessage($usdzWarning),
             ]);
 
             JobOutput::query()->updateOrCreate(
@@ -210,7 +228,7 @@ class ProcessScanJob implements ShouldQueue
             $job->update([
                 'status' => 'ready',
                 'progress' => 1.000,
-                'message' => "meshroom_obj={$meshroomObjPath}",
+                'message' => $this->buildReadyMessage($usdzWarning),
             ]);
 
             $job->scan()->update([
@@ -710,6 +728,26 @@ class ProcessScanJob implements ShouldQueue
         if (! is_file($outputUsdzPath)) {
             throw new RuntimeException('usdz failed: USDZ output missing');
         }
+    }
+
+    private function buildReadyMessage(?string $usdzWarning): string
+    {
+        if ($usdzWarning === null) {
+            return '3D model ready.';
+        }
+
+        return "3D model ready. USDZ export unavailable: {$usdzWarning}";
+    }
+
+    private function summarizeUsdzWarning(string $message): string
+    {
+        $normalized = trim(preg_replace('/\s+/', ' ', $message) ?? '');
+
+        if ($normalized === '') {
+            return 'conversion failed.';
+        }
+
+        return Str::limit($normalized, 180);
     }
 
     private function throwIfCanceled(Job $job): void
