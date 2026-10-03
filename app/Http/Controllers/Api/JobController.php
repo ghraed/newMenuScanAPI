@@ -7,6 +7,7 @@ use App\Http\Requests\ShowJobRequest;
 use App\Models\Job;
 use App\Models\JobOutput;
 use App\Services\ObjectStorageService;
+use App\Services\RunPodPipelineService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
@@ -14,6 +15,7 @@ class JobController extends Controller
 {
     public function __construct(
         private readonly ObjectStorageService $objectStorage,
+        private readonly RunPodPipelineService $runPod,
     ) {
     }
 
@@ -66,6 +68,11 @@ class JobController extends Controller
                 'progress' => (float) $job->progress,
                 'message' => $job->message,
             ]);
+        }
+
+        $remoteJobId = (string) ($job->meta['runpod']['job_id'] ?? '');
+        if ($this->runPod->isEnabled() && $remoteJobId !== '') {
+            $this->runPod->cancelJob($remoteJobId);
         }
 
         DB::transaction(function () use ($job): void {

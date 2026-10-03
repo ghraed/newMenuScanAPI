@@ -2,8 +2,10 @@
 
 use App\Http\Controllers\Api\FileController;
 use App\Http\Controllers\Api\JobController;
+use App\Http\Controllers\Api\RunPodCallbackController;
 use App\Http\Controllers\Api\ScanController;
 use App\Http\Middleware\AuthenticateSharedToken;
+use App\Http\Middleware\AuthenticateRunPodCallback;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(AuthenticateSharedToken::class)->group(function () {
@@ -26,4 +28,8 @@ Route::middleware(AuthenticateSharedToken::class)->group(function () {
         ->whereUuid('scanId')
         ->whereIn('type', ['glb', 'usdz', 'preview', 'obj'])
         ->name('api.files.show');
+});
+
+Route::middleware(AuthenticateRunPodCallback::class)->group(function () {
+    Route::post('/internal/runpod/jobs/complete', [RunPodCallbackController::class, 'complete']);
 });

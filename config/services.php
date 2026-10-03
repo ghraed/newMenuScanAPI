@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+    'runpod' => [
+        'enabled' => env('RUNPOD_ENABLED', false),
+        'base_url' => env('RUNPOD_BASE_URL'),
+        'api_token' => env('RUNPOD_API_TOKEN'),
+        'callback_token' => env('RUNPOD_CALLBACK_TOKEN'),
+        'timeout_seconds' => (int) env('RUNPOD_TIMEOUT_SECONDS', 7200),
+    ],
+
 ];
