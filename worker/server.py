@@ -119,40 +119,25 @@ def _ensure_not_canceled(job_id: str) -> None:
 
 
 def _run_command(command: list[str], job_id: str, cwd: str | None = None) -> None:
-    process = subprocess.Popen(
-        command,
-        cwd=cwd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    stdout = ""
-    stderr = ""
+    # A verbose process can fill an unread pipe and block forever. Spool output
+    # to a temporary file so cancellation remains responsive during long jobs.
+    with tempfile.TemporaryFile() as output:
+        process = subprocess.Popen(command, cwd=cwd, stdout=output, stderr=subprocess.STDOUT)
+        try:
+            while process.poll() is None:
+                if _cancel_event(job_id).is_set():
+                    raise RuntimeError("Job canceled.")
+                time.sleep(0.5)
 
-    try:
-        while True:
-            if _cancel_event(job_id).is_set():
+            if process.returncode != 0:
+                output.seek(0, os.SEEK_END)
+                output.seek(max(0, output.tell() - 4096))
+                message = output.read().decode("utf-8", errors="replace").strip()
+                raise RuntimeError(message[-400:] or "Command failed.")
+        finally:
+            if process.poll() is None:
                 process.kill()
-                raise RuntimeError("Job canceled.")
-
-            return_code = process.poll()
-            if return_code is not None:
-                out, err = process.communicate()
-                stdout += out
-                stderr += err
-                if return_code != 0:
-                    combined = (stderr or stdout).strip()
-                    if len(combined) > 400:
-                        combined = combined[-400:]
-                    raise RuntimeError(combined or "Command failed.")
-                return
-
-            time.sleep(0.5)
-    finally:
-        if process.stdout:
-            process.stdout.close()
-        if process.stderr:
-            process.stderr.close()
+            process.wait()
 
 
 def _download_images(payload: JobCreateRequest, image_dir: Path, job_id: str) -> list[Path]:
