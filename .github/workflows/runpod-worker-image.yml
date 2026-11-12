@@ -32,3 +32,30 @@ jobs:
           push: true
           tags: ghcr.io/ghraed/newmenuscanapi-gpu-worker:${{ github.sha }}
           labels: org.opencontainers.image.source=https://github.com/ghraed/newMenuScanAPI
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check worker startup and authentication
+        run: |
+          set -euo pipefail
+          docker run -d --name menuscan-worker-smoke \
+            -e WORKER_AUTH_TOKEN=smoke-token \
+            -p 127.0.0.1:3000:3000 \
+            ghcr.io/ghraed/newmenuscanapi-gpu-worker:${{ github.sha }}
+          trap 'docker rm -f menuscan-worker-smoke >/dev/null' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3000/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["service"] == "runpod-worker"'
+          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/jobs/unknown)" = 401
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer smoke-token' http://127.0.0.1:3000/jobs/unknown)" = 404
