@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "../Menu_React"
+		},
+		{
+			"path": "../Menu_API"
+		},
+		{
+			"path": "../MenuScanApp"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {}
+}

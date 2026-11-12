@@ -57,6 +57,10 @@ class ProcessScanJob implements ShouldQueue
 
             $images = $job->scan->scanImages->sortBy('slot')->values();
             $totalImages = $images->count();
+            $hasCompletedBackgroundRemoval = $job->scan->jobs()
+                ->where('type', 'background')
+                ->where('status', Job::STATUS_READY)
+                ->exists();
             $imageFolder = "{$workdir}/images";
             $processedFolder = "{$workdir}/processed";
             $outputsFolder = "{$workdir}/outputs";
@@ -133,7 +137,13 @@ class ProcessScanJob implements ShouldQueue
 
             // Meshroom still needs a local working folder, so the B2 inputs are hydrated locally first.
             $this->throwIfCanceled($job);
-            $meshroomObjPath = $this->runMeshroom($workdir, $imageFolder, $processedFolder, $job);
+            $meshroomObjPath = $this->runMeshroom(
+                $workdir,
+                $imageFolder,
+                $processedFolder,
+                $job,
+                $hasCompletedBackgroundRemoval && $totalImages > 0 && count(glob($processedFolder.'/*.png') ?: []) === $totalImages
+            );
             $objPath = $objectStorage->uploadFile(
                 ScanObjectKeys::modelObj($job->scan_id),
                 $meshroomObjPath,
@@ -289,9 +299,11 @@ class ProcessScanJob implements ShouldQueue
         ]);
     }
 
-    private function runMeshroom(string $workdir, string $imageFolder, string $processedFolder, Job $job): string
+    private function runMeshroom(string $workdir, string $imageFolder, string $processedFolder, Job $job, bool $reuseBackgroundRemoval): string
     {
-        $inputFolder = $this->resolveMeshroomInputFolder($imageFolder, $processedFolder);
+        $inputFolder = $reuseBackgroundRemoval
+            ? $processedFolder
+            : $this->resolveMeshroomInputFolder($imageFolder, $processedFolder);
         $outputFolder = "{$workdir}/meshroom-output";
 
         if (! is_dir($outputFolder) && ! mkdir($outputFolder, 0775, true) && ! is_dir($outputFolder)) {

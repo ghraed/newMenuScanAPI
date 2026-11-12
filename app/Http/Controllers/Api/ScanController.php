@@ -100,6 +100,8 @@ class ScanController extends Controller
             [
                 'heading' => $request->input('heading'),
                 'path_original' => $path,
+                'path_mask' => null,
+                'path_rgba' => null,
             ]
         );
 

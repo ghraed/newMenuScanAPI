@@ -34,6 +34,31 @@ class RunPodPipelineService
             throw new RuntimeException('RunPod submission failed: scan missing.');
         }
 
+        $images = $scan->scanImages->sortBy('slot')->values();
+        $processedUrls = [];
+        $hasCompletedBackgroundRemoval = $scan->jobs()
+            ->where('type', 'background')
+            ->where('status', Job::STATUS_READY)
+            ->exists();
+
+        if ($hasCompletedBackgroundRemoval && $images->isNotEmpty()) {
+            foreach ($images as $image) {
+                $processedPath = trim((string) $image->path_rgba);
+                $signedUrl = $processedPath !== ''
+                    ? $this->objectStorage->temporaryUrlIfAvailable($processedPath, 120)
+                    : null;
+
+                if (! $signedUrl) {
+                    $processedUrls = [];
+                    break;
+                }
+
+                $processedUrls[] = $signedUrl;
+            }
+        }
+
+        $reuseBackgroundRemoval = count($processedUrls) === $images->count() && $images->isNotEmpty();
+
         $callbackUrl = rtrim((string) config('app.url'), '/').'/api/internal/runpod/jobs/complete';
         $callbackToken = trim((string) config('services.runpod.callback_token'));
 
@@ -52,13 +77,11 @@ class RunPodPipelineService
         $payload = [
             'localJobId' => $job->id,
             'scanId' => $scan->id,
-            'images' => $scan->scanImages
-                ->sortBy('slot')
-                ->values()
-                ->map(fn (ScanImage $image) => [
+            'images' => $images
+                ->map(fn (ScanImage $image, int $index) => [
                     'slot' => (int) $image->slot,
                     'heading' => $image->heading,
-                    'url' => $this->resolveImageUrl($image),
+                    'url' => $reuseBackgroundRemoval ? $processedUrls[$index] : $this->resolveImageUrl($image),
                 ])
                 ->all(),
             'scaleMeters' => (float) ($scan->scale_meters ?? 0),
@@ -72,7 +95,7 @@ class RunPodPipelineService
                 ],
             ],
             'options' => [
-                'removeBackground' => true,
+                'removeBackground' => ! $reuseBackgroundRemoval,
                 'generatePreview' => true,
                 'generateUsdz' => true,
             ],
