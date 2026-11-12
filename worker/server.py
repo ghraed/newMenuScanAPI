@@ -81,7 +81,7 @@ class JobCreateRequest(BaseModel):
 
 def _require_auth(authorization: str | None) -> None:
     if WORKER_AUTH_TOKEN == "":
-        return
+        raise HTTPException(status_code=503, detail="Worker auth is not configured.")
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token.")
     token = authorization.removeprefix("Bearer ").strip()
