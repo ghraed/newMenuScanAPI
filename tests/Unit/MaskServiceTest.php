@@ -44,9 +44,12 @@ class MaskServiceTest extends TestCase
             'final',
         );
 
-        $this->assertSame($inputPath, $result['path']);
+        $this->assertSame(sys_get_temp_dir().'/mask-service-test/slot-0-final.jpg', $result['path']);
+        $this->assertFileExists($result['path']);
+        $this->assertSame([2200, 1467], array_slice(getimagesize($result['path']), 0, 2));
         $this->assertNull($result['selectionContext']);
 
+        @unlink($result['path']);
         @unlink($inputPath);
     }
 }
