@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Models\PersonalAccessToken;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class AuthenticateSharedToken
@@ -14,9 +15,7 @@ class AuthenticateSharedToken
         $bearerToken = $request->bearerToken();
 
         if (! $bearerToken) {
-            return response()->json([
-                'message' => 'Unauthenticated.',
-            ], 401);
+            return $this->reject('missing_bearer');
         }
 
         [$tokenId, $plainToken] = $this->parseToken($bearerToken);
@@ -30,15 +29,11 @@ class AuthenticateSharedToken
             });
 
         if (! $token || $token->tokenable_type !== \App\Models\User::class || ! $token->user) {
-            return response()->json([
-                'message' => 'Unauthenticated.',
-            ], 401);
+            return $this->reject('invalid_token');
         }
 
         if ($token->expires_at && $token->expires_at->isPast()) {
-            return response()->json([
-                'message' => 'Token expired.',
-            ], 401);
+            return $this->reject('expired_token', 'Token expired.');
         }
 
         $token->forceFill([
@@ -51,6 +46,14 @@ class AuthenticateSharedToken
         app('auth')->guard()->setUser($user);
 
         return $next($request);
+    }
+
+    private function reject(string $reason, string $message = 'Unauthenticated.'): Response
+    {
+        Log::notice('Scan API authentication rejected', ['reason' => $reason]);
+
+        return response()->json(['message' => $message], 401)
+            ->header('X-Scan-Auth-Failure', $reason);
     }
 
     /**

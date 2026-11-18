@@ -30,6 +30,18 @@ class BackgroundRemovalApiTest extends TestCase
         parent::setUp();
     }
 
+    public function test_scan_auth_identifies_missing_and_invalid_bearer_without_echoing_credentials(): void
+    {
+        $this->postJson('/api/scans', [])
+            ->assertUnauthorized()
+            ->assertHeader('X-Scan-Auth-Failure', 'missing_bearer');
+
+        $this->postJson('/api/scans', [], ['Authorization' => 'Bearer 999999|QA_RUN_invalid_token'])
+            ->assertUnauthorized()
+            ->assertHeader('X-Scan-Auth-Failure', 'invalid_token')
+            ->assertDontSee('QA_RUN_invalid_token');
+    }
+
     public function test_it_starts_background_removal_as_a_job(): void
     {
         Queue::fake();
