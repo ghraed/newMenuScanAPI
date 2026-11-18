@@ -28,24 +28,8 @@ class AuthenticateSharedToken
                 return hash_equals($candidate->token, hash('sha256', $plainToken));
             });
 
-        if (! $token) {
-            $candidate = $tokenId !== null ? PersonalAccessToken::query()->find($tokenId) : null;
-
-            return $this->reject('invalid_token', 'Unauthenticated.', [
-                'token_id' => $tokenId,
-                'plain_length' => strlen($plainToken),
-                'token_record_found' => (bool) $candidate,
-                'database' => $candidate?->getConnection()->getDatabaseName(),
-            ]);
-        }
-
-        if ($token->tokenable_type !== \App\Models\User::class || ! $token->user) {
-            return $this->reject('invalid_token', 'Unauthenticated.', [
-                'token_id' => $tokenId,
-                'token_record_found' => true,
-                'token_type_valid' => $token->tokenable_type === \App\Models\User::class,
-                'token_user_found' => (bool) $token->user,
-            ]);
+        if (! $token || $token->tokenable_type !== \App\Models\User::class || ! $token->user) {
+            return $this->reject('invalid_token', 'Unauthenticated.', ['token_id' => $tokenId]);
         }
 
         if ($token->expires_at && $token->expires_at->isPast()) {

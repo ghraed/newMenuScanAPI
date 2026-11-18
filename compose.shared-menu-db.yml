@@ -1,6 +1,8 @@
 # Production scan API: use the same identity and dish database as NewMenuAPI.
 # Start with: docker compose -f compose.shared-menu-db.yml up -d --build
 # SHARED_MENU_DB_USERNAME and SHARED_MENU_DB_PASSWORD belong in the untracked .env.
+# Keep .env DB_HOST, DB_DATABASE, DB_USERNAME, and DB_PASSWORD aligned with the
+# values below. Laravel's artisan serve child can read .env over Compose values.
 services:
   laravel.test:
     restart: unless-stopped
