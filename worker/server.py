@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 import secrets
+import shlex
 import shutil
+import struct
 import subprocess
 import tempfile
 import threading
@@ -186,16 +189,64 @@ def _create_preview(source_path: Path, preview_path: Path, job_id: str) -> None:
     _run_command(["convert", str(source_path), str(preview_path)], job_id)
 
 
+def _has_color_texture(obj_path: Path) -> bool:
+    try:
+        with obj_path.open(encoding="utf-8", errors="replace") as obj_file:
+            material_names = [
+                line.partition(" ")[2].strip()
+                for _, line in zip(range(100), obj_file)
+                if line.startswith("mtllib ")
+            ]
+        for material_name in material_names:
+            material_path = obj_path.parent / material_name
+            if not material_path.is_file():
+                continue
+            with material_path.open(encoding="utf-8", errors="replace") as material_file:
+                for line in material_file:
+                    if not line.lstrip().lower().startswith("map_kd "):
+                        continue
+                    parts = shlex.split(line)
+                    if len(parts) >= 2 and (material_path.parent / parts[-1]).is_file():
+                        return True
+    except (OSError, ValueError):
+        return False
+    return False
+
+
 def _locate_best_obj(output_dir: Path) -> Path | None:
-    best: tuple[int, float, Path] | None = None
+    best: tuple[int, int, float, Path] | None = None
     for candidate in output_dir.rglob("*.obj"):
         if not candidate.is_file():
             continue
         stat = candidate.stat()
-        ranking = (stat.st_size, stat.st_mtime, candidate)
+        ranking = (int(_has_color_texture(candidate)), stat.st_size, stat.st_mtime, candidate)
         if best is None or ranking > best:
             best = ranking
-    return best[2] if best else None
+    return best[3] if best else None
+
+
+def _glb_has_base_color_texture(glb_path: Path) -> bool:
+    try:
+        with glb_path.open("rb") as glb_file:
+            magic, version, _ = struct.unpack("<4sII", glb_file.read(12))
+            chunk_length, chunk_type = struct.unpack("<II", glb_file.read(8))
+            if magic != b"glTF" or version != 2 or chunk_type != 0x4E4F534A:
+                return False
+            document = json.loads(glb_file.read(chunk_length))
+    except (OSError, ValueError, struct.error):
+        return False
+
+    images = document.get("images") or []
+    textures = document.get("textures") or []
+    for material in document.get("materials") or []:
+        base_color = (material.get("pbrMetallicRoughness") or {}).get("baseColorTexture") or {}
+        texture_index = base_color.get("index")
+        if not isinstance(texture_index, int) or not (0 <= texture_index < len(textures)):
+            continue
+        image_index = textures[texture_index].get("source")
+        if isinstance(image_index, int) and 0 <= image_index < len(images):
+            return True
+    return False
 
 
 def _run_meshroom(input_dir: Path, output_dir: Path, job_id: str) -> Path:
@@ -227,6 +278,8 @@ def _run_obj_to_glb(obj_path: Path, glb_path: Path, scale_meters: float, job_id:
     )
     if not glb_path.is_file():
         raise RuntimeError("blender failed: GLB output missing")
+    if not _glb_has_base_color_texture(glb_path):
+        raise RuntimeError("blender failed: GLB output has no embedded color texture")
 
 
 def _run_glb_to_usdz(glb_path: Path, usdz_path: Path, job_id: str) -> None:
@@ -306,7 +359,7 @@ def _process_job(job_id: str, payload: JobCreateRequest) -> None:
 
         _update_job(job_id, progress=75, message="Converting OBJ to GLB.")
         glb_path = outputs_dir / "model.glb"
-        _run_obj_to_glb(final_obj, glb_path, payload.scaleMeters, job_id)
+        _run_obj_to_glb(obj_path, glb_path, payload.scaleMeters, job_id)
 
         usdz_warning: str | None = None
         usdz_path = outputs_dir / "model.usdz"
