@@ -59,3 +59,4 @@ jobs:
           curl -fsS http://127.0.0.1:3000/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["service"] == "runpod-worker"'
           test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/jobs/unknown)" = 401
           test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer smoke-token' http://127.0.0.1:3000/jobs/unknown)" = 404
+          docker exec menuscan-worker-smoke bash /opt/runpod-worker/scripts/ci/smoke_usdz_conversion.sh

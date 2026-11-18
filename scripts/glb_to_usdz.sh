@@ -14,7 +14,7 @@ if [ ! -f "$input_glb" ]; then
     exit 66
 fi
 
-blender_bin="${BLENDER_BIN:-/usr/bin/blender}"
+blender_bin="${USD_BLENDER_BIN:-${BLENDER_BIN:-/usr/bin/blender}}"
 usd_python_bin="${USD_PYTHON_BIN:-/opt/usd-tools-env/bin/python}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 workdir="$(mktemp -d)"
