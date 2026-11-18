@@ -5,8 +5,10 @@ namespace Tests\Feature;
 use App\Jobs\ProcessBackgroundRemovalJob;
 use App\Models\Dish;
 use App\Models\Job;
+use App\Models\PersonalAccessToken;
 use App\Models\Scan;
 use App\Models\ScanImage;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -79,6 +81,35 @@ class BackgroundRemovalApiTest extends TestCase
         ]);
 
         Queue::assertPushed(ProcessBackgroundRemovalJob::class);
+    }
+
+    public function test_restaurant_staff_can_create_a_scan_with_a_menu_token(): void
+    {
+        [, $restaurant] = $this->createRestaurantAuthContext();
+        $staff = User::factory()->create();
+        $staff->staffRestaurants()->attach($restaurant->id);
+        $plainToken = 'QA_RUN_staff_scan_token';
+        $token = PersonalAccessToken::query()->create([
+            'tokenable_type' => User::class,
+            'tokenable_id' => $staff->id,
+            'name' => 'QA_RUN_staff_token',
+            'token' => hash('sha256', $plainToken),
+            'abilities' => ['*'],
+        ]);
+
+        $response = $this->postJson('/api/scans', [
+            'deviceId' => 'QA_RUN_staff_device',
+            'targetType' => 'dish',
+            'scaleMeters' => 0.24,
+            'slotsTotal' => 2,
+        ], ['Authorization' => "Bearer {$token->id}|{$plainToken}"]);
+
+        $response->assertCreated()->assertJsonStructure(['scanId']);
+        $this->assertDatabaseHas('scans', [
+            'id' => $response->json('scanId'),
+            'restaurant_id' => $restaurant->id,
+            'created_by_user_id' => $staff->id,
+        ]);
     }
 
     public function test_background_job_status_includes_available_slots(): void

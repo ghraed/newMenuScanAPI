@@ -124,7 +124,7 @@ class JobController extends Controller
 
     private function assertJobBelongsToCurrentUser(Job $job, \Illuminate\Http\Request $request): void
     {
-        $ownerRestaurantId = $request->user()?->restaurant?->id;
+        $ownerRestaurantId = $request->user()?->currentRestaurant()?->id;
 
         if (! $ownerRestaurantId || ! $job->scan || (int) $job->scan->restaurant_id !== (int) $ownerRestaurantId) {
             abort(404);

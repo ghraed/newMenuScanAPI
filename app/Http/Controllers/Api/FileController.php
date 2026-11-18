@@ -108,7 +108,7 @@ class FileController extends Controller
 
     private function assertScanBelongsToCurrentUser(Scan $scan, Request $request): void
     {
-        $ownerRestaurantId = $request->user()?->restaurant?->id;
+        $ownerRestaurantId = $request->user()?->currentRestaurant()?->id;
 
         if (! $ownerRestaurantId || (int) $scan->restaurant_id !== (int) $ownerRestaurantId) {
             abort(404);

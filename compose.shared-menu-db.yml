@@ -1,0 +1,74 @@
+# Production scan API: use the same identity and dish database as NewMenuAPI.
+# Start with: docker compose -f compose.shared-menu-db.yml up -d --build
+# SHARED_MENU_DB_USERNAME and SHARED_MENU_DB_PASSWORD belong in the untracked .env.
+services:
+  laravel.test:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: docker/8.4/Dockerfile
+    image: sail-8.4/app
+    ports:
+      - '127.0.0.1:18000:80'
+    environment: &scan_environment
+      WWWUSER: '${WWWUSER:-1000}'
+      LARAVEL_SAIL: '1'
+      DB_CONNECTION: mysql
+      DB_HOST: menu_api_db
+      DB_PORT: '3306'
+      DB_DATABASE: menu
+      DB_USERNAME: '${SHARED_MENU_DB_USERNAME:?Set SHARED_MENU_DB_USERNAME in .env}'
+      DB_PASSWORD: '${SHARED_MENU_DB_PASSWORD:?Set SHARED_MENU_DB_PASSWORD in .env}'
+      MENU_API_URL: '${MENU_API_URL:-https://rozer.fun}'
+      QUEUE_CONNECTION: redis
+      CACHE_STORE: redis
+      SESSION_DRIVER: redis
+    volumes:
+      - '.:/var/www/html'
+    networks:
+      - sail
+      - menu_api
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  queue:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: docker/8.4/Dockerfile
+    image: sail-8.4/app
+    command: php artisan queue:work --tries=1
+    environment: *scan_environment
+    volumes:
+      - '.:/var/www/html'
+    networks:
+      - sail
+      - menu_api
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    restart: unless-stopped
+    image: redis:alpine
+    ports:
+      - '127.0.0.1:${FORWARD_REDIS_PORT:-6379}:6379'
+    volumes:
+      - sail-redis:/data
+    networks:
+      - sail
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      retries: 3
+      timeout: 5s
+
+networks:
+  sail:
+    driver: bridge
+  menu_api:
+    external: true
+    name: newmenuapi_default
+
+volumes:
+  sail-redis:

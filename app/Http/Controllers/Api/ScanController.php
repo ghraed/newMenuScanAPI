@@ -31,7 +31,7 @@ class ScanController extends Controller
     public function store(StoreScanRequest $request): JsonResponse
     {
         $user = $request->user();
-        $restaurant = $user?->restaurant;
+        $restaurant = $user?->currentRestaurant();
 
         if (! $user || ! $restaurant) {
             return response()->json([
@@ -291,7 +291,7 @@ class ScanController extends Controller
 
     private function assertScanBelongsToCurrentUser(Scan $scan, \Illuminate\Http\Request $request): void
     {
-        $ownerRestaurantId = $request->user()?->restaurant?->id;
+        $ownerRestaurantId = $request->user()?->currentRestaurant()?->id;
 
         if (! $ownerRestaurantId || (int) $scan->restaurant_id !== (int) $ownerRestaurantId) {
             abort(404);
