@@ -19,6 +19,10 @@ and start new scans in `menu`. Existing app sessions referring to those scan IDs
 will not resolve after cutover; create new scans in the app. The backups preserve
 the old records for a later, explicitly mapped import.
 
+At preparation time, the old database had no pending queue jobs. One scan job
+still says `processing`, but its last update was 2026-03-09; it belongs to the
+ownerless archive and is not an active worker task.
+
 ## Before cutover
 
 1. Confirm both checkouts are at the intended commits and clean. The scan API
