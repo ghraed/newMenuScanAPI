@@ -23,6 +23,7 @@ services:
       DB_PASSWORD: '${SHARED_MENU_DB_PASSWORD:?Set SHARED_MENU_DB_PASSWORD in .env}'
       MENU_API_URL: '${MENU_API_URL:-https://rozer.fun}'
       QUEUE_CONNECTION: redis
+      REDIS_QUEUE_RETRY_AFTER: '3900'
       CACHE_STORE: redis
       SESSION_DRIVER: redis
     volumes:
@@ -40,7 +41,7 @@ services:
       context: .
       dockerfile: docker/8.4/Dockerfile
     image: sail-8.4/app
-    command: php artisan queue:work --tries=1
+    command: php artisan queue:work --tries=1 --timeout=3600
     environment: *scan_environment
     volumes:
       - '.:/var/www/html'

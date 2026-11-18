@@ -20,9 +20,11 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public function __construct(public string $jobId)
-    {
-    }
+    public int $timeout = 3600;
+
+    public bool $failOnTimeout = true;
+
+    public function __construct(public string $jobId) {}
 
     public function handle(MaskService $maskService, ObjectStorageService $objectStorage): void
     {
@@ -135,6 +137,17 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
         }
     }
 
+    public function failed(?Throwable $error): void
+    {
+        Job::query()
+            ->whereKey($this->jobId)
+            ->whereIn('status', [Job::STATUS_QUEUED, Job::STATUS_PROCESSING, Job::STATUS_PARTIAL])
+            ->update([
+                'status' => Job::STATUS_ERROR,
+                'message' => $error?->getMessage() ?? 'Background removal timed out.',
+            ]);
+    }
+
     private function throwIfCanceled(Job $job): void
     {
         if ($job->isCanceled()) {
@@ -143,7 +156,7 @@ class ProcessBackgroundRemovalJob implements ShouldQueue
     }
 
     /**
-     * @param Collection<int, ScanImage> $images
+     * @param  Collection<int, ScanImage>  $images
      * @return Collection<int, ScanImage>
      */
     private function pickPreviewImages(Collection $images): Collection
