@@ -29,7 +29,7 @@ class AuthenticateSharedToken
             });
 
         if (! $token || $token->tokenable_type !== \App\Models\User::class || ! $token->user) {
-            return $this->reject('invalid_token');
+            return $this->reject('invalid_token', 'Unauthenticated.', ['token_id' => $tokenId]);
         }
 
         if ($token->expires_at && $token->expires_at->isPast()) {
@@ -48,9 +48,9 @@ class AuthenticateSharedToken
         return $next($request);
     }
 
-    private function reject(string $reason, string $message = 'Unauthenticated.'): Response
+    private function reject(string $reason, string $message = 'Unauthenticated.', array $context = []): Response
     {
-        Log::notice('Scan API authentication rejected', ['reason' => $reason]);
+        Log::notice('Scan API authentication rejected', ['reason' => $reason] + $context);
 
         return response()->json(['message' => $message], 401)
             ->header('X-Scan-Auth-Failure', $reason);
