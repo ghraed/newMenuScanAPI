@@ -488,10 +488,95 @@ class MaskService
             $clearFromEdge($width - 1, $y);
         }
 
+        $changed = $this->clearLowerNeutralSupport($image) || $changed;
+
         if ($changed) {
             imagepng($image, $outputPath);
         }
         imagedestroy($image);
+    }
+
+    private function clearLowerNeutralSupport(\GdImage $image): bool
+    {
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $top = null;
+        $bottom = null;
+
+        // The opaque subject bounds locate the support without depending on
+        // where the subject sits in the camera frame.
+        for ($y = 0; $y < $height; $y++) {
+            for ($x = 0; $x < $width; $x += 4) {
+                if (((imagecolorat($image, $x, $y) >> 24) & 0x7F) > 80) {
+                    continue;
+                }
+
+                $top ??= $y;
+                $bottom = $y;
+                break;
+            }
+        }
+
+        if ($top === null || $bottom === null || $bottom - $top < 20) {
+            return false;
+        }
+
+        $minimumY = $top + (int) floor(($bottom - $top) * 0.60);
+        $seedY = $top + (int) floor(($bottom - $top) * 0.88);
+        $visited = str_repeat("\0", $width * $height);
+        $queue = new SplQueue();
+
+        for ($y = $seedY; $y <= $bottom; $y++) {
+            for ($x = 0; $x < $width; $x++) {
+                $index = $y * $width + $x;
+                if ($this->bitsetGet($visited, $index) || ! $this->isLowerNeutralPixel(imagecolorat($image, $x, $y))) {
+                    continue;
+                }
+
+                $this->bitsetSet($visited, $index);
+                $queue->enqueue($index);
+            }
+        }
+
+        $changed = false;
+        while (! $queue->isEmpty()) {
+            $index = $queue->dequeue();
+            $x = $index % $width;
+            $y = intdiv($index, $width);
+            $rgba = imagecolorat($image, $x, $y);
+            imagesetpixel($image, $x, $y, ($rgba & 0x00FFFFFF) | (127 << 24));
+            $changed = true;
+
+            foreach ([[$x - 1, $y], [$x + 1, $y], [$x, $y - 1], [$x, $y + 1]] as [$nextX, $nextY]) {
+                if ($nextX < 0 || $nextX >= $width || $nextY < $minimumY || $nextY > $bottom) {
+                    continue;
+                }
+
+                $nextIndex = $nextY * $width + $nextX;
+                if ($this->bitsetGet($visited, $nextIndex) || ! $this->isLowerNeutralPixel(imagecolorat($image, $nextX, $nextY))) {
+                    continue;
+                }
+
+                $this->bitsetSet($visited, $nextIndex);
+                $queue->enqueue($nextIndex);
+            }
+        }
+
+        return $changed;
+    }
+
+    private function isLowerNeutralPixel(int $rgba): bool
+    {
+        if ((($rgba >> 24) & 0x7F) === 127) {
+            return false;
+        }
+
+        $red = ($rgba >> 16) & 0xFF;
+        $green = ($rgba >> 8) & 0xFF;
+        $blue = $rgba & 0xFF;
+
+        return max($red, $green, $blue) <= 205
+            && max($red, $green, $blue) - min($red, $green, $blue) <= 30;
     }
 
     private function neutralBackgroundBrightness(int $rgba): ?int

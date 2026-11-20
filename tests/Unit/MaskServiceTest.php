@@ -9,6 +9,42 @@ use Tests\TestCase;
 
 class MaskServiceTest extends TestCase
 {
+    public function test_gray_support_below_plate_is_removed_without_erasing_dark_food_details(): void
+    {
+        if (! function_exists('imagecreatetruecolor')) {
+            $this->markTestSkipped('GD is not installed.');
+        }
+
+        $path = tempnam(sys_get_temp_dir(), 'mask-support-');
+        $image = imagecreatetruecolor(40, 40);
+        imagealphablending($image, false);
+        imagesavealpha($image, true);
+        $transparent = imagecolorallocatealpha($image, 0, 0, 0, 127);
+        $white = imagecolorallocate($image, 240, 240, 240);
+        $gray = imagecolorallocate($image, 85, 90, 94);
+        $black = imagecolorallocate($image, 12, 12, 12);
+        imagefill($image, 0, 0, $transparent);
+        imagefilledrectangle($image, 8, 6, 31, 25, $white);
+        imagefilledrectangle($image, 12, 24, 27, 34, $gray);
+        imagefilledrectangle($image, 17, 12, 22, 15, $black);
+        imagepng($image, $path);
+        imagedestroy($image);
+
+        try {
+            $service = new MaskService($this->createMock(ObjectStorageService::class));
+            $method = new ReflectionMethod(MaskService::class, 'clearEdgeConnectedNeutralBackground');
+            $method->invoke($service, $path);
+
+            $result = imagecreatefrompng($path);
+            $this->assertSame(127, (imagecolorat($result, 20, 30) >> 24) & 0x7F);
+            $this->assertSame(0, (imagecolorat($result, 20, 14) >> 24) & 0x7F);
+            $this->assertSame(0, (imagecolorat($result, 10, 20) >> 24) & 0x7F);
+            imagedestroy($result);
+        } finally {
+            @unlink($path);
+        }
+    }
+
     public function test_gray_and_black_edge_background_becomes_transparent_without_erasing_dark_subject(): void
     {
         if (! function_exists('imagecreatetruecolor')) {
