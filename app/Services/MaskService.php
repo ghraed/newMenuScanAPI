@@ -73,6 +73,8 @@ class MaskService
             throw new RuntimeException("rembg failed for slot {$slot}: output missing");
         }
 
+        $this->clearEdgeConnectedNeutralBackground($outputPath);
+
         if ($selectionContext !== null) {
             $this->refineMaskToSelection($outputPath, $selectionContext);
         }
@@ -412,6 +414,102 @@ class MaskService
             'preparedWidth' => $preparedWidth,
             'preparedHeight' => $preparedHeight,
         ];
+    }
+
+    private function clearEdgeConnectedNeutralBackground(string $outputPath): void
+    {
+        if (! function_exists('imagecreatefrompng')) {
+            return;
+        }
+
+        $image = @imagecreatefrompng($outputPath);
+        if (! $image instanceof \GdImage) {
+            return;
+        }
+
+        imagealphablending($image, false);
+        imagesavealpha($image, true);
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $visited = str_repeat("\0", $width * $height);
+        $changed = false;
+
+        $clearFromEdge = function (int $startX, int $startY) use ($image, $width, $height, &$visited, &$changed): void {
+            $startIndex = $startY * $width + $startX;
+            if ($this->bitsetGet($visited, $startIndex)) {
+                return;
+            }
+
+            $seed = imagecolorat($image, $startX, $startY);
+            $seedBrightness = $this->neutralBackgroundBrightness($seed);
+            if ($seedBrightness === null) {
+                return;
+            }
+
+            $queue = new SplQueue();
+            $queue->enqueue($startIndex);
+            $this->bitsetSet($visited, $startIndex);
+
+            while (! $queue->isEmpty()) {
+                $index = $queue->dequeue();
+                $x = $index % $width;
+                $y = intdiv($index, $width);
+                $rgba = imagecolorat($image, $x, $y);
+                imagesetpixel($image, $x, $y, ($rgba & 0x00FFFFFF) | (127 << 24));
+                $changed = true;
+
+                foreach ([[$x - 1, $y], [$x + 1, $y], [$x, $y - 1], [$x, $y + 1]] as [$nextX, $nextY]) {
+                    if ($nextX < 0 || $nextY < 0 || $nextX >= $width || $nextY >= $height) {
+                        continue;
+                    }
+
+                    $nextIndex = $nextY * $width + $nextX;
+                    if ($this->bitsetGet($visited, $nextIndex)) {
+                        continue;
+                    }
+
+                    $brightness = $this->neutralBackgroundBrightness(imagecolorat($image, $nextX, $nextY));
+                    if ($brightness === null || abs($brightness - $seedBrightness) > 28) {
+                        continue;
+                    }
+
+                    $this->bitsetSet($visited, $nextIndex);
+                    $queue->enqueue($nextIndex);
+                }
+            }
+        };
+
+        for ($x = 0; $x < $width; $x++) {
+            $clearFromEdge($x, 0);
+            $clearFromEdge($x, $height - 1);
+        }
+        for ($y = 1; $y < $height - 1; $y++) {
+            $clearFromEdge(0, $y);
+            $clearFromEdge($width - 1, $y);
+        }
+
+        if ($changed) {
+            imagepng($image, $outputPath);
+        }
+        imagedestroy($image);
+    }
+
+    private function neutralBackgroundBrightness(int $rgba): ?int
+    {
+        $alpha = ($rgba >> 24) & 0x7F;
+        if ($alpha >= 120) {
+            return null;
+        }
+
+        $red = ($rgba >> 16) & 0xFF;
+        $green = ($rgba >> 8) & 0xFF;
+        $blue = $rgba & 0xFF;
+        $darkest = min($red, $green, $blue);
+        $brightest = max($red, $green, $blue);
+
+        return $brightest <= 150 && $brightest - $darkest <= 18
+            ? intdiv($red + $green + $blue, 3)
+            : null;
     }
 
     private function refineMaskToSelection(string $outputPath, array $context): void
